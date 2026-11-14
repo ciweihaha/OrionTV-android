@@ -40,7 +40,7 @@ data class VodItem(
 data class Episode(
     val index: Int,
     val title: String,
-    /** Null until a real source provides a playable URL (stage 2). */
+    /** Playable URL; null for placeholder episodes without one. */
     val url: String? = null,
 )
 

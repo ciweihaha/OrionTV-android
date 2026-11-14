@@ -15,19 +15,21 @@ import androidx.recyclerview.widget.RecyclerView
 import com.ciweihaha.oriontv.R
 import com.ciweihaha.oriontv.data.model.VodCategory
 import com.ciweihaha.oriontv.data.model.VodItem
-import com.ciweihaha.oriontv.data.source.PlaceholderSourceRepository
+import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivityVodBrowseBinding
 import com.ciweihaha.oriontv.ui.common.PosterArt
 import kotlinx.coroutines.launch
 
 /**
  * VOD browse: category chips on top, poster wall below.
- * Stage 1 shows placeholder items; detail opens the Hero page.
+ * Categories and items come from the agg CMS source (stage 2); the
+ * repository fails soft to an empty list, shown via [emptyHint].
+ * Detail opens the Hero page.
  */
 class VodBrowseActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityVodBrowseBinding
-    private val source = PlaceholderSourceRepository()
+    private val source = AggSourceRepository()
     private var selectedCategory = "all"
     private lateinit var categoryAdapter: CategoryAdapter
 

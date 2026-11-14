@@ -17,7 +17,7 @@ import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.HomeAction
 import com.ciweihaha.oriontv.data.model.VodCategory
 import com.ciweihaha.oriontv.data.placeholder.PlaceholderData
-import com.ciweihaha.oriontv.data.source.PlaceholderSourceRepository
+import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.data.update.UpdateChecker
 import com.ciweihaha.oriontv.ui.live.LiveActivity
 import com.ciweihaha.oriontv.ui.player.PlayerActivity
@@ -27,12 +27,13 @@ import kotlinx.coroutines.launch
 /**
  * Home browse screen (Leanback). Rows: 继续观看 / 直播 / 点播 / 应用.
  * Type scale is one step down from stock Leanback (T9); gold is the
- * brand/focus colour. Content here is stage-1 placeholder data.
+ * brand/focus colour. Live rows are still stage-1 placeholder data;
+ * VOD categories now come from the agg CMS source.
  */
 @Suppress("DEPRECATION")
 class HomeFragment : BrowseSupportFragment() {
 
-    private val source = PlaceholderSourceRepository()
+    private val source = AggSourceRepository()
     private val epg = PlaceholderEpgRepository()
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {

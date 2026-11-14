@@ -8,9 +8,10 @@ import com.ciweihaha.oriontv.data.model.VodItem
 import com.ciweihaha.oriontv.data.placeholder.PlaceholderData
 
 /**
- * Source access. Stage 2 replaces [PlaceholderSourceRepository] with a
- * TVBox-compatible source parser; the UI only ever talks to this interface,
- * so the swap touches no screen code.
+ * Source access. VOD is served by [AggSourceRepository] (agg CMS,
+ * stage 2); live channels still come from [PlaceholderSourceRepository]
+ * until the M3U source is wired. The UI only ever talks to this
+ * interface, so the swap touches no screen logic.
  *
  * Red lines (never implement here): 点播首页、T2、BBC、天光云影、TV 5.9.0、凤凰、
  * moontv.
