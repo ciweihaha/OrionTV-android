@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OrionTV</string>
+    <string name="live_title">直播</string>
+    <string name="vod_title">点播</string>
+    <string name="episodes_title">选集</string>
+    <string name="play">播放</string>
+    <string name="skip_intro">跳过片头</string>
+    <string name="poster_desc">海报</string>
+    <string name="empty_hint">暂无内容</string>
+    <string name="demo_data_note">演示数据 · 真实源接入见第二阶段</string>
+</resources>
