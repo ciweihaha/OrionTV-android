@@ -10,6 +10,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger (round 2: the push that re-registered this workflow did
+  # not itself start a run, so a manual trigger is kept as a fallback).
+  workflow_dispatch:
 
 jobs:
   build:
