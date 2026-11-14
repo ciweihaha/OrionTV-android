@@ -3,6 +3,7 @@ package com.ciweihaha.oriontv.ui.home
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.leanback.widget.ImageCardView
 import androidx.leanback.widget.Presenter
 import com.ciweihaha.oriontv.R
@@ -64,7 +65,7 @@ class TextCardPresenter : Presenter() {
             setPadding(pad, pad, pad, pad)
         }
         val text = TextView(context).apply {
-            setTextColor(context.getColor(R.color.orion_text))
+            setTextColor(ContextCompat.getColor(context, R.color.orion_text))
             textSize = 16f
             maxLines = 2
         }
