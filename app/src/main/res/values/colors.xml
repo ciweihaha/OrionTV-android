@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Deep space + stardust gold (approved mockup tokens). -->
+    <color name="orion_bg">#0A0E1A</color>
+    <color name="orion_panel">#12141F</color>
+    <color name="orion_panel_border">#23283A</color>
+    <color name="orion_text">#E8EAF0</color>
+    <color name="orion_text_soft">#C6CBD9</color>
+    <color name="orion_text_dim">#8B91A3</color>
+    <color name="orion_gold">#E8C15A</color>
+    <color name="orion_gold_dark">#B8933A</color>
+    <color name="orion_error">#E57373</color>
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+</resources>
