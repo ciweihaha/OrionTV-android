@@ -31,6 +31,11 @@ jobs:
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --stacktrace
+
       - name: Build debug APK
         run: |
           chmod +x gradlew
