@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.OrionTv.Leanback" parent="Theme.Leanback">
+        <item name="android:windowBackground">@color/orion_bg</item>
+        <item name="android:textColor">@color/orion_text</item>
+        <item name="colorPrimary">@color/orion_gold</item>
+        <item name="colorAccent">@color/orion_gold</item>
+    </style>
+
+    <style name="Theme.OrionTv" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/orion_bg</item>
+        <item name="android:textColor">@color/orion_text</item>
+        <item name="colorPrimary">@color/orion_gold</item>
+        <item name="colorPrimaryDark">@color/orion_bg</item>
+        <item name="colorAccent">@color/orion_gold</item>
+    </style>
+</resources>
