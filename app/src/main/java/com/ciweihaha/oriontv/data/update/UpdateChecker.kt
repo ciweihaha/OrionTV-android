@@ -1,6 +1,5 @@
 package com.ciweihaha.oriontv.data.update
 
-import android.util.Log
 import com.ciweihaha.oriontv.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -31,7 +30,7 @@ class UpdateChecker(
         runCatching {
             val body = runCatching { fetcher(ENDPOINT_PRIMARY) }
                 .getOrElse {
-                    Log.i(TAG, "primary endpoint failed, trying fallback: ${it.message}")
+                    // Primary failed; try the fallback endpoint.
                     fetcher(ENDPOINT_FALLBACK)
                 }
             val latest = parseVersion(body)
@@ -43,7 +42,6 @@ class UpdateChecker(
     companion object {
         const val ENDPOINT_PRIMARY = "https://ysp.ciweihaha.win/agg?ac=oriontv-version"
         const val ENDPOINT_FALLBACK = "https://ysp.ciweihaha.win/agg/oriontv-version.json"
-        private const val TAG = "UpdateChecker"
 
         /** Accepts `{"version":"1.7.2"}` or a bare `1.7.2` (optional leading v). */
         fun parseVersion(body: String): String? {
