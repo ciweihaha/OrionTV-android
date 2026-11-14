@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Type scale is one step down from stock Leanback (T9 fix). -->
+    <dimen name="orion_safe_margin">48dp</dimen>
+    <dimen name="orion_text_title">20sp</dimen>
+    <dimen name="orion_text_section">15sp</dimen>
+    <dimen name="orion_text_channel">16sp</dimen>
+    <dimen name="orion_text_body">15sp</dimen>
+    <dimen name="orion_text_small">13sp</dimen>
+    <dimen name="orion_text_meta">12sp</dimen>
+    <dimen name="orion_card_radius">12dp</dimen>
+</resources>
