@@ -49,7 +49,7 @@ object M3uParser {
                         number = "%03d".format(channels.size + 1),
                         name = pending.name.ifEmpty { "Unknown" },
                         group = pending.group.ifEmpty { "Default" },
-                        logoUrl = pending.logo.ifEmpty { null },
+                        logoUrl = pending.logo.takeIf { it.isNotEmpty() },
                         streamUrl = url,
                     )
                 }
