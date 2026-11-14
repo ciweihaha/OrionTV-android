@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -18,11 +21,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # NOTE: do NOT use android-actions/setup-android here — v3 runs
+      # `sdkmanager tools`, and the obsolete `tools` package no longer
+      # exists in the SDK repository, so that step exits 1. The runner
+      # already ships an Android SDK with cmdline-tools; use it directly.
       - name: Install SDK packages
         run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
