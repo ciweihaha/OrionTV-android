@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:name=".OrionTvApp"
+        android:allowBackup="true"
+        android:icon="@drawable/ic_orion"
+        android:banner="@drawable/ic_orion_banner"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.OrionTv.Leanback">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Leanback theme only for the home host; the other screens are
+             AppCompatActivity and need the AppCompat-based theme. -->
+        <activity
+            android:name=".ui.live.LiveActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.OrionTv" />
+
+        <activity
+            android:name=".ui.vod.VodBrowseActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.OrionTv" />
+
+        <activity
+            android:name=".ui.vod.VodDetailActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.OrionTv" />
+
+        <activity
+            android:name=".ui.player.PlayerActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.OrionTv" />
+    </application>
+</manifest>
