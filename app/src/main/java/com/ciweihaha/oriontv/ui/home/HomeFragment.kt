@@ -21,6 +21,7 @@ import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.data.update.UpdateChecker
 import com.ciweihaha.oriontv.ui.live.LiveActivity
 import com.ciweihaha.oriontv.ui.player.PlayerActivity
+import com.ciweihaha.oriontv.ui.settings.SettingsActivity
 import com.ciweihaha.oriontv.ui.vod.VodBrowseActivity
 import kotlinx.coroutines.launch
 
@@ -62,6 +63,9 @@ class HomeFragment : BrowseSupportFragment() {
                             // Demo intro window so the skip-intro button shows.
                             .putExtra(PlayerActivity.EXTRA_SKIP_INTRO_END_MS, 30_000L),
                     )
+                    "m3u_settings" -> startActivity(
+                        Intent(requireContext(), SettingsActivity::class.java),
+                    )
                     "check_update" -> checkForUpdate()
                 }
             }
@@ -90,6 +94,7 @@ class HomeFragment : BrowseSupportFragment() {
 
             val appAdapter = ArrayObjectAdapter(PosterCardPresenter())
             appAdapter.add(HomeAction("test_stream", "播放器测试", "BipBop 测试流 · 验证 Media3"))
+            appAdapter.add(HomeAction("m3u_settings", "直播源设置", "配置 M3U 直播地址"))
             appAdapter.add(HomeAction("check_update", "检查更新", "走 okys-agg 版本接口"))
             rowsAdapter.add(ListRow(HeaderItem(3, "应用"), appAdapter))
 

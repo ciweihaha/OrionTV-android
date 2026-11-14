@@ -14,24 +14,35 @@ import com.ciweihaha.oriontv.R
 import com.ciweihaha.oriontv.data.epg.PlaceholderEpgRepository
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.Program
+import com.ciweihaha.oriontv.data.settings.AppSettings
+import com.ciweihaha.oriontv.data.source.M3uDiskCache
+import com.ciweihaha.oriontv.data.source.M3uSource
 import com.ciweihaha.oriontv.data.source.PlaceholderSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivityLiveBinding
 import com.ciweihaha.oriontv.ui.player.PlayerActivity
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
  * Live TV: channel list (left) + now/next detail (right).
- * Stage 1 shows placeholder channels; the play button stays disabled
- * until a real source provides a stream URL (stage 2).
+ *
+ * Channels come from the configured M3U source (settings): cached list
+ * renders instantly, then a refresh updates it. With no M3U address
+ * configured (or when both cache and network are empty) the stage-1
+ * placeholder channels are shown instead. EPG is still placeholder.
  */
 class LiveActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLiveBinding
     private val source = PlaceholderSourceRepository()
     private val epg = PlaceholderEpgRepository()
+    private val settings by lazy { AppSettings(this) }
+    private val m3uSource by lazy {
+        M3uSource(diskCache = M3uDiskCache(File(cacheDir, "m3u")))
+    }
     private var channels: List<Channel> = emptyList()
     private var selected: Channel? = null
 
@@ -42,12 +53,25 @@ class LiveActivity : AppCompatActivity() {
         binding.channelList.layoutManager = LinearLayoutManager(this)
 
         lifecycleScope.launch {
-            channels = source.channels()
-            binding.channelList.adapter = ChannelAdapter(channels) { channel ->
-                select(channel)
+            val m3uUrl = settings.getM3uUrl()
+            if (m3uUrl.isNullOrBlank()) {
+                showChannels(source.channels())
+            } else {
+                val cached = m3uSource.getCached(m3uUrl)
+                if (cached.isNotEmpty()) {
+                    binding.sourceNote.visibility = View.GONE
+                    showChannels(cached)
+                }
+                val fresh = m3uSource.refresh(m3uUrl)
+                if (fresh.isNotEmpty()) {
+                    binding.sourceNote.visibility = View.GONE
+                    showChannels(fresh)
+                } else if (cached.isEmpty()) {
+                    binding.sourceNote.text = getString(R.string.m3u_load_failed)
+                    binding.sourceNote.visibility = View.VISIBLE
+                    showChannels(source.channels())
+                }
             }
-            val initialId = intent.getStringExtra(EXTRA_CHANNEL_ID)
-            select(channels.find { it.id == initialId } ?: channels.firstOrNull())
         }
 
         binding.playButton.setOnClickListener {
@@ -59,6 +83,19 @@ class LiveActivity : AppCompatActivity() {
                     .putExtra(PlayerActivity.EXTRA_TITLE, channel.name),
             )
         }
+    }
+
+    private fun showChannels(list: List<Channel>) {
+        channels = list
+        binding.channelList.adapter = ChannelAdapter(list) { channel ->
+            select(channel)
+        }
+        val initialId = intent.getStringExtra(EXTRA_CHANNEL_ID)
+        select(
+            list.find { it.id == initialId }
+                ?: list.find { it.id == selected?.id }
+                ?: list.firstOrNull(),
+        )
     }
 
     private fun select(channel: Channel?) {
