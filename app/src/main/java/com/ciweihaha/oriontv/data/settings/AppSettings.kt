@@ -12,6 +12,9 @@ import java.net.URL
 fun normalizeM3uUrl(raw: String): String? {
     val trimmed = raw.trim()
     if (trimmed.isEmpty()) return null
+    // java.net.URL is lenient about spaces ("https://not a url" parses),
+    // so reject whitespace explicitly: it can never be a usable address.
+    if (trimmed.any { it.isWhitespace() }) return null
     val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
     return try {
         val url = URL(withScheme)
