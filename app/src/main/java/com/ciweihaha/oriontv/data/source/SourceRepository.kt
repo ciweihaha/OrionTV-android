@@ -1,6 +1,7 @@
 package com.ciweihaha.oriontv.data.source
 
 import com.ciweihaha.oriontv.data.model.Channel
+import com.ciweihaha.oriontv.data.model.Episode
 import com.ciweihaha.oriontv.data.model.VodCategory
 import com.ciweihaha.oriontv.data.model.VodDetail
 import com.ciweihaha.oriontv.data.model.VodItem
