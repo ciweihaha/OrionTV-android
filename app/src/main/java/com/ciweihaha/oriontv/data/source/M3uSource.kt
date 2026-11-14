@@ -105,7 +105,7 @@ class M3uDiskCache(private val cacheDir: File) {
         channels.forEach { array.put(it.toJson()) }
         entry.put("channels", array)
         val json = entry.toString()
-        if (json.toByteArray(Charsets.UTF_8).size > MAX_CACHE_BYTES) return
+        if (json.toByteArray(Charsets.UTF_8).size > MAX_CACHE_BYTES) return@runCatching
         cacheDir.mkdirs()
         cacheFile(m3uUrl).writeText(json, Charsets.UTF_8)
     }
