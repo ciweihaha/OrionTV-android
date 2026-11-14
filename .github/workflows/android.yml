@@ -1,3 +1,8 @@
+# NOTE (2026-11-14): this workflow showed state "deleted" on GitHub with
+# 0 runs ever, although the file was never deleted from main (round 1
+# baseline). Touching this file re-registers it; if CI stops triggering
+# again, check the workflow state at
+# https://github.com/ciweihaha/OrionTV-android/actions before anything else.
 name: Android CI
 
 on:
