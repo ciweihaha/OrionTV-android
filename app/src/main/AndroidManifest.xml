@@ -60,5 +60,18 @@
             android:exported="false"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.OrionTv" />
+
+        <!-- Round 1: search + favorites. -->
+        <activity
+            android:name=".ui.search.SearchActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.OrionTv" />
+
+        <activity
+            android:name=".ui.favorites.FavoritesActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.OrionTv" />
     </application>
 </manifest>
