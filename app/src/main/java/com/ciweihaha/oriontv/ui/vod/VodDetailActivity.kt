@@ -151,7 +151,16 @@ class VodDetailActivity : AppCompatActivity() {
         }
         val firstPlayable = episodes.firstOrNull { !it.url.isNullOrBlank() }
         binding.playButton.isEnabled = firstPlayable != null
-        binding.playButton.text = if (firstPlayable != null) "播放" else "暂无可播放剧集"
+        // Resume (round 12): the play button offers to continue when this
+        // episode already has a usable breakpoint.
+        val resumeMs = firstPlayable?.let {
+            AppSources.library(this).progressFor(detail.item.id, it.index)?.resumePositionMs()
+        } ?: 0L
+        binding.playButton.text = when {
+            firstPlayable == null -> "暂无可播放剧集"
+            resumeMs > 0 -> "继续播放"
+            else -> "播放"
+        }
         binding.playButton.setOnClickListener {
             firstPlayable?.let { playEpisode(detail.item.title, it) }
         }
@@ -163,11 +172,26 @@ class VodDetailActivity : AppCompatActivity() {
             Toast.makeText(this, "该集暂无可播放地址", Toast.LENGTH_SHORT).show()
             return
         }
+        val detail = currentDetail ?: return
+        // Resume (round 12): reopening an episode continues where the
+        // viewer left off; resumePositionMs() already drops too-early
+        // (under 10s) and near-end (within 60s) stops.
+        val resumeMs = AppSources.library(this)
+            .progressFor(detail.item.id, episode.index)
+            ?.resumePositionMs() ?: 0L
         startActivity(
             Intent(this, PlayerActivity::class.java)
                 .putExtra(PlayerActivity.EXTRA_URL, url)
-                .putExtra(PlayerActivity.EXTRA_TITLE, "$title · ${episode.title}"),
+                .putExtra(PlayerActivity.EXTRA_TITLE, "$title · ${episode.title}")
+                .putExtra(PlayerActivity.EXTRA_VOD_ID, detail.item.id)
+                .putExtra(PlayerActivity.EXTRA_VOD_TITLE, title)
+                .putExtra(PlayerActivity.EXTRA_EPISODE_INDEX, episode.index)
+                .putExtra(PlayerActivity.EXTRA_EPISODE_TITLE, episode.title)
+                .putExtra(PlayerActivity.EXTRA_START_POSITION_MS, resumeMs),
         )
+        if (resumeMs > 0) {
+            Toast.makeText(this, "从断点继续播放", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private class SourceAdapter(
