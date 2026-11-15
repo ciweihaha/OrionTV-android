@@ -65,10 +65,22 @@ class PlayerActivity : AppCompatActivity() {
      *  (reset on READY); a pending retry runnable, if any. */
     private var ioErrorRetries = 0
     private var pendingRetryRunnable: Runnable? = null
-    /** R14-A: true after an automatic line switch caused by an error —
-     *  the new line failing too must end in an error toast, not a
-     *  ping-pong between two dead lines. Reset on READY. */
-    private var autoSwitchedOnError = false
+    /**
+     * R15-D: error-driven line switches in the current unstable episode.
+     * R14's single flag (`autoSwitchedOnError`, reset on every READY)
+     * only stopped a switch twice within one error handling — once the
+     * new line became READY the flag cleared, so two flaky lines could
+     * ping-pong forever (A errors → switch to B → B errors → switch
+     * back to A …), each cycle burning ~19s of retries and never
+     * showing the final error. The count is now only reset after the
+     * current line has played stably for [STABLE_PLAY_MS] (a new,
+     * unrelated failure), or by an explicit manual line switch — so
+     * only ONE error-driven switch is allowed per unstable episode.
+     * [currentLineReadyAtMs] is the wall-clock of the last READY of the
+     * active player (0 = never READY yet, e.g. the first load failed).
+     */
+    private var errorSwitchCount = 0
+    private var currentLineReadyAtMs: Long = 0L
     private val seekPreview get() = _seekPreview
     private var _seekPreview: SeekPreviewController? = null
 
@@ -143,7 +155,8 @@ class PlayerActivity : AppCompatActivity() {
         // exhausted by the previous item (or a rebuild after HOME)
         // must not block retries on this one.
         ioErrorRetries = 0
-        autoSwitchedOnError = false
+        errorSwitchCount = 0
+        currentLineReadyAtMs = 0L
         binding.playerView.player = exo
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -153,15 +166,25 @@ class PlayerActivity : AppCompatActivity() {
             }
         })
         exo.setMediaItem(MediaItem.fromUri(url))
-        if (startPositionMs > 0) exo.seekTo(startPositionMs)
+        // R15-F: only VOD resumes at a saved position. A live stream
+        // resumes at the live edge: a position saved at HOME goes stale
+        // once it slides out of the live window, and seeking to it
+        // fails with ERROR_CODE_BEHIND_LIVE_WINDOW (which the retry
+        // policy does not cover). VOD has no window, so the seek is safe.
+        if (startPositionMs > 0 && vodId.isNotBlank()) exo.seekTo(startPositionMs)
         exo.prepare()
         exo.playWhenReady = playWhenReady
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
-                    // R14-A: playing again — the error counters reset.
+                    // R14-A: playing again — the retry counter resets.
                     ioErrorRetries = 0
-                    autoSwitchedOnError = false
+                    // R15-D: the current line became READY — this is the
+                    // start of its (potentially stable) play period. The
+                    // error-switch count is NOT reset here (that was the
+                    // R14 ping-pong hole); it resets only after the line
+                    // plays stably — see handlePlayerError.
+                    currentLineReadyAtMs = System.currentTimeMillis()
                     // D3: no seek preview for live streams (see
                     // [isLiveStream]): their duration is TIME_UNSET, so
                     // a preview built here could only ever target 0.
@@ -196,7 +219,9 @@ class PlayerActivity : AppCompatActivity() {
         // an error-driven switch marks the episode so the new line
         // failing too ends in a toast, not a ping-pong.
         cancelPendingRetry()
-        if (fromError) autoSwitchedOnError = true else autoSwitchedOnError = false
+        // R15-D: an error-driven switch counts against the current
+        // unstable episode; a manual switch starts a fresh episode.
+        if (fromError) errorSwitchCount++ else errorSwitchCount = 0
         // R14-A: the new line gets its own retry budget — the old
         // line's exhausted counter must not block retries on this one.
         ioErrorRetries = 0
@@ -221,12 +246,16 @@ class PlayerActivity : AppCompatActivity() {
         candidate.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state != Player.STATE_READY) return
-                // R14-A: playing again — error counters reset on EVERY
-                // READY, not just the first: a line that recovers from
-                // a retry gets a fresh budget for the next error
+                // R14-A: playing again — the retry counter resets on
+                // EVERY READY, not just the first: a line that recovers
+                // from a retry gets a fresh budget for the next error
                 // episode. (The swap below still runs only once.)
                 ioErrorRetries = 0
-                autoSwitchedOnError = false
+                // R15-D: this is the new line's READY time (see
+                // initPlayer) — the error-switch count is NOT reset
+                // here; resetting it on every READY is what let two
+                // flaky lines ping-pong forever.
+                currentLineReadyAtMs = System.currentTimeMillis()
                 if (settled) return
                 settled = true
                 handler.removeCallbacks(timeoutRunnable)
@@ -270,14 +299,26 @@ class PlayerActivity : AppCompatActivity() {
                 // R13-B: same HOME-mid-switch guard as the READY path —
                 // no failure toast over the home screen.
                 if (!isStarted) return
-                // The old player is untouched and still attached, so
-                // playback continues on the previous line.
                 Log.e(TAG, "line switch failed", error)
-                Toast.makeText(
-                    this@PlayerActivity,
-                    "线路 ${index + 1} 切换失败，已保留当前线路",
-                    Toast.LENGTH_LONG,
-                ).show()
+                if (fromError) {
+                    // R15-E: the switch was error-driven — the line we
+                    // "kept" is the one that just failed, so the screen
+                    // is dead and "已保留当前线路" would be a lie. Show
+                    // the real failure instead.
+                    Toast.makeText(
+                        this@PlayerActivity,
+                        shortPlaybackError(error),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    // The old player is untouched and still attached, so
+                    // playback continues on the previous line.
+                    Toast.makeText(
+                        this@PlayerActivity,
+                        "线路 ${index + 1} 切换失败，已保留当前线路",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
                 showControls()
             }
         })
@@ -544,12 +585,17 @@ class PlayerActivity : AppCompatActivity() {
         ioErrorRetries = 0
         // Retries exhausted (or a non-transient error): try the next
         // line automatically instead of leaving a dead screen — but
-        // only once per error episode, so two dead lines cannot
-        // ping-pong forever.
-        if (lineUrls.size > 1 && !autoSwitchedOnError) {
+        // only once per unstable episode (R15-D): a line that played
+        // stably starts a new episode, so a previous error-driven
+        // switch does not count against it.
+        val stablePlayMs = System.currentTimeMillis() - currentLineReadyAtMs
+        if (shouldAutoSwitchLine(lineUrls.size, errorSwitchCount, stablePlayMs)) {
             val next = LiveLines.nextIndex(lineIndex, lineUrls.size)
             if (next != lineIndex) {
                 Toast.makeText(this, "当前线路异常，正在切换线路…", Toast.LENGTH_SHORT).show()
+                // A stable play period starts a fresh episode: the
+                // previous error-driven switch no longer counts.
+                if (stablePlayMs >= STABLE_PLAY_MS) errorSwitchCount = 0
                 switchToLine(next, fromError = true)
                 return
             }
@@ -682,6 +728,33 @@ class PlayerActivity : AppCompatActivity() {
             3 -> 3_000L
             4 -> 5_000L
             else -> 8_000L
+        }
+
+        /**
+         * R15-D: a line only counts as "stable" after this long of
+         * uninterrupted playback. An error-driven switch is allowed
+         * once per unstable episode: the first failure may switch
+         * lines, but the new line must then play stably for this long
+         * before another error-driven switch is allowed — otherwise
+         * two flaky lines ping-pong forever and the error never
+         * surfaces. A manual line switch also starts a fresh episode.
+         */
+        const val STABLE_PLAY_MS = 60_000L
+
+        /**
+         * R15-D: pure auto-switch policy (unit-tested). [stablePlayMs]
+         * is how long the current line played before this failure; a
+         * line that played stably starts a new episode, so a previous
+         * error-driven switch does not count against it.
+         */
+        fun shouldAutoSwitchLine(
+            lineCount: Int,
+            errorSwitchCount: Int,
+            stablePlayMs: Long,
+        ): Boolean {
+            if (lineCount <= 1) return false
+            val switchesThisEpisode = if (stablePlayMs >= STABLE_PLAY_MS) 0 else errorSwitchCount
+            return switchesThisEpisode == 0
         }
     }
 }
