@@ -12,6 +12,7 @@ import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.OnItemViewClickedListener
 import androidx.lifecycle.lifecycleScope
 import com.ciweihaha.oriontv.R
+import com.ciweihaha.oriontv.data.AppSources
 import com.ciweihaha.oriontv.data.epg.PlaceholderEpgRepository
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.HomeAction
@@ -30,8 +31,11 @@ import kotlinx.coroutines.launch
 /**
  * Home browse screen (Leanback). Rows: 继续观看 / 直播 / 点播 / 应用.
  * Type scale is one step down from stock Leanback (T9); gold is the
- * brand/focus colour. Live rows are still stage-1 placeholder data;
- * VOD categories now come from the agg CMS source.
+ * brand/focus colour. The live row shows the real M3U channels
+ * (default: the user's own live.m3u, same playlist LiveActivity
+ * loads); VOD categories come from the agg CMS source. When the live
+ * playlist cannot be loaded the row falls back to the placeholder
+ * demo set so the home screen still renders instead of going blank.
  */
 @Suppress("DEPRECATION")
 class HomeFragment : BrowseSupportFragment() {
@@ -93,8 +97,18 @@ class HomeFragment : BrowseSupportFragment() {
     }
 
     private fun loadRows() {
+        // Resolve the live source here (context is valid in
+        // onActivityCreated) rather than inside the coroutine, so a
+        // destroyed view can never make requireContext() throw.
+        val liveSource = AppSources.source(requireContext())
         viewLifecycleOwner.lifecycleScope.launch {
-            val channels = source.channels()
+            // Real live channels (M3U). Both loaders are fail-soft
+            // and never throw: an empty real list means the playlist
+            // could not be fetched, so fall back to the placeholder
+            // demo set — the same fallback LiveActivity uses —
+            // instead of leaving the row empty.
+            val realChannels = liveSource.channels()
+            val channels = realChannels.ifEmpty { source.channels() }
             val categories = source.categories()
             val rowsAdapter = ArrayObjectAdapter(ListRowPresenter())
 
