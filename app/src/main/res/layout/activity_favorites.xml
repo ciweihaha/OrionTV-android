@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/orion_bg"
+    android:orientation="vertical"
+    android:padding="@dimen/orion_safe_margin">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="我的收藏"
+        android:textColor="@color/orion_gold"
+        android:textSize="@dimen/orion_text_title"
+        android:textStyle="bold" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/favorite_grid"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="16dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/empty_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="暂无收藏，在详情页按「收藏」添加"
+        android:textColor="@color/orion_text_dim"
+        android:textSize="@dimen/orion_text_body"
+        android:visibility="gone" />
+</LinearLayout>
