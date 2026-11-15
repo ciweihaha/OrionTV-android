@@ -18,6 +18,8 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.ciweihaha.oriontv.R
+import com.ciweihaha.oriontv.data.AppSources
+import com.ciweihaha.oriontv.data.model.WatchRecord
 import com.ciweihaha.oriontv.data.source.LiveLines
 import com.ciweihaha.oriontv.databinding.ActivityPlayerBinding
 
@@ -47,6 +49,13 @@ class PlayerActivity : AppCompatActivity() {
     private var currentUrl: String = ""
     private var savedPositionMs: Long = 0L
     private var savedPlayWhenReady: Boolean = true
+    /** Resume (round 12): which VOD episode is playing; blank for live (no record). */
+    private var vodId: String = ""
+    private var vodTitle: String = ""
+    private var episodeIndex: Int = 1
+    private var episodeTitle: String = ""
+    /** Wall-clock of the last periodic progress save (throttle, 30s). */
+    private var lastProgressSaveMs: Long = 0L
     private val seekPreview get() = _seekPreview
     private var _seekPreview: SeekPreviewController? = null
 
@@ -54,6 +63,14 @@ class PlayerActivity : AppCompatActivity() {
     private val progressTicker = object : Runnable {
         override fun run() {
             updateProgressUi()
+            // Resume: persist progress every 30s while playing, so a kill
+            // (not just BACK/HOME) still leaves a usable breakpoint.
+            val exo = player
+            if (exo != null && exo.isPlaying &&
+                System.currentTimeMillis() - lastProgressSaveMs >= PROGRESS_SAVE_INTERVAL_MS
+            ) {
+                saveWatchProgress()
+            }
             handler.postDelayed(this, 500)
         }
     }
@@ -72,6 +89,13 @@ class PlayerActivity : AppCompatActivity() {
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         skipIntroEndMs = intent.getLongExtra(EXTRA_SKIP_INTRO_END_MS, 0L)
+        vodId = intent.getStringExtra(EXTRA_VOD_ID).orEmpty()
+        vodTitle = intent.getStringExtra(EXTRA_VOD_TITLE).orEmpty()
+        episodeIndex = intent.getIntExtra(EXTRA_EPISODE_INDEX, 1)
+        episodeTitle = intent.getStringExtra(EXTRA_EPISODE_TITLE).orEmpty()
+        // Resume: already thresholded by WatchRecord.resumePositionMs()
+        // on the detail side; 0 means start from the beginning.
+        val resumeStartMs = intent.getLongExtra(EXTRA_START_POSITION_MS, 0L)
         baseTitle = title
         lineUrls = intent.getStringArrayListExtra(EXTRA_LINE_URLS)
             ?.filter { it.isNotBlank() }.orEmpty()
@@ -94,7 +118,7 @@ class PlayerActivity : AppCompatActivity() {
         }
         updateTitleAndLineButton()
         currentUrl = url
-        initPlayer(url)
+        initPlayer(url, resumeStartMs)
         handler.post(progressTicker)
         showControls()
     }
@@ -133,6 +157,10 @@ class PlayerActivity : AppCompatActivity() {
                         SeekPreviewController(exo.duration.coerceAtLeast(0L))
                     }
                 }
+                // Resume: playback reached the end — save once so the
+                // finished record is cleared and the episode restarts
+                // from 0 next time (LibraryStore drops near-end records).
+                if (state == Player.STATE_ENDED) saveWatchProgress()
             }
         })
         // The progress ticker is posted once in onCreate, not here, so a
@@ -326,6 +354,34 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Resume (round 12): persist VOD progress so reopening the episode
+     * continues where the viewer left off. Live streams (no vodId) and
+     * unknown durations are never recorded; a finished episode is
+     * cleared by [com.ciweihaha.oriontv.data.LibraryStore.saveProgress]
+     * (position within 60s of the end). Called on a 30s tick while
+     * playing, on STATE_ENDED, and in onStop (BACK / HOME).
+     */
+    private fun saveWatchProgress() {
+        if (vodId.isBlank()) return
+        val exo = player ?: return
+        val duration = exo.duration
+        if (duration <= 0L) return // live / unknown duration: not a VOD record
+        val position = exo.currentPosition
+        if (position <= 0L) return
+        lastProgressSaveMs = System.currentTimeMillis()
+        AppSources.library(this).saveProgress(
+            WatchRecord(
+                vodId = vodId,
+                title = vodTitle.ifBlank { baseTitle },
+                episodeIndex = episodeIndex,
+                episodeTitle = episodeTitle,
+                positionMs = position,
+                durationMs = duration,
+            ),
+        )
+    }
+
     private fun showControls() {
         binding.controlsBar.visibility = View.VISIBLE
         binding.playerTitle.visibility = View.VISIBLE
@@ -403,6 +459,7 @@ class PlayerActivity : AppCompatActivity() {
         savedPositionMs = player?.currentPosition ?: savedPositionMs
         savedPlayWhenReady = player?.playWhenReady ?: savedPlayWhenReady
         resetSeekPreview()
+        saveWatchProgress()
         player?.release()
         player = null
     }
@@ -411,12 +468,21 @@ class PlayerActivity : AppCompatActivity() {
         const val EXTRA_URL = "url"
         const val EXTRA_TITLE = "title"
         const val EXTRA_SKIP_INTRO_END_MS = "skip_intro_end_ms"
+        /** VOD identity for the resume record; absent/blank for live (no record). */
+        const val EXTRA_VOD_ID = "vod_id"
+        const val EXTRA_VOD_TITLE = "vod_title"
+        const val EXTRA_EPISODE_INDEX = "episode_index"
+        const val EXTRA_EPISODE_TITLE = "episode_title"
+        /** Resume position in ms (already thresholded by WatchRecord); 0 = from start. */
+        const val EXTRA_START_POSITION_MS = "start_position_ms"
         /** All playable line URLs of the current channel (round 9). */
         const val EXTRA_LINE_URLS = "line_urls"
         /** Index into [EXTRA_LINE_URLS] of the line being played. */
         const val EXTRA_LINE_INDEX = "line_index"
         private const val TAG = "PlayerActivity"
         private const val CONTROLS_TIMEOUT_MS = 4_000L
+        /** Periodic resume-save interval while playing. */
+        private const val PROGRESS_SAVE_INTERVAL_MS = 30_000L
         /** Give up on a candidate line after this long; old line survives. */
         private const val LINE_SWITCH_TIMEOUT_MS = 10_000L
     }
