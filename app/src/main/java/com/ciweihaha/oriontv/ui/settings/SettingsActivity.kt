@@ -33,12 +33,17 @@ class SettingsActivity : AppCompatActivity() {
             binding.skipIntroSecondsInput.text.toString().toIntOrNull()?.let {
                 settings.setSkipIntroSeconds(it)
             }
+            // R13-D: the source singleton caches the old address — drop
+            // it so Home / Live pick up the new M3U on the next load.
+            com.ciweihaha.oriontv.data.AppSources.invalidate()
             Toast.makeText(this, R.string.m3u_saved, Toast.LENGTH_SHORT).show()
             finish()
         }
 
         binding.clearButton.setOnClickListener {
             settings.setM3uUrl(null)
+            // R13-D: same as save — the default address applies again.
+            com.ciweihaha.oriontv.data.AppSources.invalidate()
             binding.m3uUrlInput.setText("")
             binding.statusText.text = getString(R.string.m3u_cleared)
         }
