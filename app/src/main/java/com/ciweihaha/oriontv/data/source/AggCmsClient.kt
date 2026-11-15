@@ -75,6 +75,20 @@ class AggCmsClient(
         parseVideoItem(list.getJSONObject(0))
     }
 
+    /**
+     * R13-G: keyword search — the Apple CMS `videolist` endpoint takes
+     * `wd` (no `t` needed). This is what makes the home "搜索" entry
+     * work out of the box: the default VOD is agg, and without this
+     * the search screen only ever queried the (usually unconfigured)
+     * TVBox source and told the user to configure one.
+     */
+    suspend fun search(query: String, page: Int): VideoListResult =
+        withContext(Dispatchers.IO) {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val body = getWithRetry("$AGG_BASE_URL?ac=videolist&wd=$encoded&pg=$page")
+            parseVideoList(body)
+        }
+
     private suspend fun getWithRetry(url: String): String {
         var lastError: Exception? = null
         for (attempt in 0 until MAX_ATTEMPTS) {

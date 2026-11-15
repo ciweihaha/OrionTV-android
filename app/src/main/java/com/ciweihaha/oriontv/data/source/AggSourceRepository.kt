@@ -103,6 +103,13 @@ class AggSourceRepository(
         null
     }
 
+    /** R13-G: search the agg catalogue (the default VOD). Fail-soft
+     *  like everything else here — an empty list, never a throw. */
+    override suspend fun search(query: String, page: Int): List<VodItem> =
+        failSoft(emptyList()) {
+            client.search(query, page.coerceAtLeast(1)).list.map { it.toVodItem() }
+        }
+
     /** Fail-soft helper that never swallows coroutine cancellation. */
     private suspend inline fun <T> failSoft(default: T, block: suspend () -> T): T =
         try {
