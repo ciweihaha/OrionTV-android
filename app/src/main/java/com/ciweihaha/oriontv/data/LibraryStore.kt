@@ -75,6 +75,28 @@ class LibraryStore(context: Context) {
         prefs.edit().remove(KEY_HISTORY).apply()
     }
 
+    // -- Learned intro ends -------------------------------------------------
+    // 学习式片头（第 12 轮后补）：用户在片头窗口内手动往前跳的落点，按 vodId
+    // 记下来，本剧通用；下集起直接用学到的点，不用每次都手动跳。只存最近
+    // 学过的条目，上限 100 条。
+
+    /** 学到的片头结束点（毫秒），没学过返回 null。 */
+    fun learnedIntroEndMs(vodId: String): Long? =
+        decodeLearnedIntros(prefs.getString(KEY_LEARNED_INTROS, null))[vodId]
+
+    /** 记下一次学到的片头结束点（最近学过的排在前面，超上限丢最旧的）。 */
+    fun saveLearnedIntroEnd(vodId: String, introEndMs: Long) = synchronized(writeLock) {
+        if (vodId.isBlank() || introEndMs <= 0L) return
+        val current = decodeLearnedIntros(prefs.getString(KEY_LEARNED_INTROS, null))
+            .toMutableMap()
+        current.remove(vodId)
+        val updated = linkedMapOf(vodId to introEndMs)
+        updated.putAll(current)
+        val trimmed = updated.entries.take(MAX_LEARNED_INTROS)
+            .associate { it.key to it.value }
+        prefs.edit().putString(KEY_LEARNED_INTROS, encodeLearnedIntros(trimmed)).apply()
+    }
+
     // -- Search history ---------------------------------------------------
 
     fun searchHistory(): List<String> =
@@ -107,7 +129,9 @@ class LibraryStore(context: Context) {
         const val KEY_HISTORY = "history"
         const val KEY_SEARCH_HISTORY = "search_history"
         const val KEY_LAST_LIVE_CHANNEL = "last_live_channel"
+        const val KEY_LEARNED_INTROS = "learned_intros"
         const val MAX_HISTORY = 50
+        const val MAX_LEARNED_INTROS = 100
         const val MAX_SEARCH_HISTORY = 20
         const val FINISHED_MARGIN_MS = 60_000L
 
@@ -194,6 +218,29 @@ class LibraryStore(context: Context) {
                 val array = JSONArray(json)
                 List(array.length()) { i -> array.optString(i) }.filter { it.isNotEmpty() }
             }.getOrDefault(emptyList())
+        }
+
+        /** 学到的片头结束点：vodId → 毫秒。空 map 编码为 "{}"。 */
+        fun encodeLearnedIntros(map: Map<String, Long>): String {
+            val obj = JSONObject()
+            map.forEach { (vodId, introEndMs) -> obj.put(vodId, introEndMs) }
+            return obj.toString()
+        }
+
+        /** 非法的 JSON / 非正数落点一律丢弃，只留 vodId 非空、落点 > 0 的条目。 */
+        fun decodeLearnedIntros(json: String?): Map<String, Long> {
+            if (json.isNullOrBlank()) return emptyMap()
+            return runCatching {
+                val obj = JSONObject(json)
+                val out = linkedMapOf<String, Long>()
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val vodId = keys.next()
+                    val introEndMs = obj.optLong(vodId, -1L)
+                    if (vodId.isNotEmpty() && introEndMs > 0L) out[vodId] = introEndMs
+                }
+                out
+            }.getOrDefault(emptyMap())
         }
     }
 }
