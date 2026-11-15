@@ -324,9 +324,44 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun commitPendingSeek() {
         val target = seekPreview?.commit() ?: return
-        player?.seekTo(target)
+        val exo = player
+        // 学习式片头：用户手动快进（遥控方向键预览后提交）才有机会学；跳过按钮
+        // 本身不走这里（直接 seek 到 skipIntroEndMs，落点等于认定点，本来也不学）。
+        if (exo != null && vodId.isNotBlank()) {
+            maybeLearnIntroEnd(
+                fromMs = exo.currentPosition,
+                toMs = target,
+                durationMs = exo.duration.coerceAtLeast(0L),
+            )
+        }
+        exo?.seekTo(target)
         binding.seekPreviewBubble.visibility = View.GONE
         updateProgressUi()
+    }
+
+    /**
+     * 学习式片头：用户在片头窗口内手动往前跳、落点越过当前认定的片头结束点时，
+     * 把落点记为本片的片头结束点（按 vodId 存，本剧通用），下集起直接用学到
+     * 的点。直播（vodId 为空）不学；写库失败不崩溃。
+     * 安卓版没有手动标记按钮，最近一次符合条件的跳跃就是最新的认定值。
+     */
+    private fun maybeLearnIntroEnd(fromMs: Long, toMs: Long, durationMs: Long) {
+        if (!IntroSkip.shouldLearnIntroEnd(
+                fromMs = fromMs,
+                toMs = toMs,
+                introEndMs = skipIntroEndMs,
+                hasMark = false,
+                durationMs = durationMs,
+            )
+        ) return
+        runCatching {
+            AppSources.library(this).saveLearnedIntroEnd(vodId, toMs)
+        }.onSuccess {
+            // 本集余下时间也按新学的点走（按钮在落点处本来就不再显示）。
+            skipIntroEndMs = toMs
+        }.onFailure {
+            Log.e(TAG, "片头学习保存失败", it)
+        }
     }
 
     private fun togglePlayPause() {
