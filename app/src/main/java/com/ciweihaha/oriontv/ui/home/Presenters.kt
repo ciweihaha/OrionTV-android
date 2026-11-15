@@ -10,6 +10,7 @@ import com.ciweihaha.oriontv.R
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.HomeAction
 import com.ciweihaha.oriontv.data.model.VodCategory
+import com.ciweihaha.oriontv.data.model.WatchRecord
 import com.ciweihaha.oriontv.ui.common.PosterArt
 
 /** Poster card for channels and VOD items (2:3, 12dp radius via card style). */
@@ -39,7 +40,25 @@ class PosterCardPresenter : Presenter() {
                 card.contentText = item.subtitle
                 card.mainImage = PosterArt.make(card.context, item.title, 320, 480)
             }
+            // R13-C: a continue-watching breakpoint — title, episode
+            // and how far in, so the row reads as "pick up here".
+            is WatchRecord -> {
+                card.titleText = item.title
+                val episode = item.episodeTitle.ifBlank { "第 ${item.episodeIndex} 集" }
+                card.contentText = "$episode · 已看 ${formatMinutes(item.positionMs)}"
+                card.mainImage = PosterArt.make(card.context, item.title, 320, 480)
+            }
         }
+    }
+
+    /** mm:ss (or h:mm:ss past an hour) for the "已看" label. */
+    private fun formatMinutes(ms: Long): String {
+        val totalSeconds = (ms / 1000).coerceAtLeast(0L)
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
+        else "%02d:%02d".format(minutes, seconds)
     }
 
     override fun onUnbindViewHolder(viewHolder: ViewHolder) {

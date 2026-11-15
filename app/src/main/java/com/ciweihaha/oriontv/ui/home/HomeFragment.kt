@@ -17,6 +17,7 @@ import com.ciweihaha.oriontv.data.epg.PlaceholderEpgRepository
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.HomeAction
 import com.ciweihaha.oriontv.data.model.VodCategory
+import com.ciweihaha.oriontv.data.model.WatchRecord
 import com.ciweihaha.oriontv.data.placeholder.PlaceholderData
 import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.data.update.UpdateChecker
@@ -26,6 +27,7 @@ import com.ciweihaha.oriontv.ui.player.PlayerActivity
 import com.ciweihaha.oriontv.ui.search.SearchActivity
 import com.ciweihaha.oriontv.ui.settings.SettingsActivity
 import com.ciweihaha.oriontv.ui.vod.VodBrowseActivity
+import com.ciweihaha.oriontv.ui.vod.VodDetailActivity
 import kotlinx.coroutines.launch
 
 /**
@@ -42,6 +44,28 @@ class HomeFragment : BrowseSupportFragment() {
 
     private val source = AggSourceRepository()
     private val epg = PlaceholderEpgRepository()
+    /** R13-C/D: kept so onResume can refresh the continue row in place
+     *  (history changed after watching) and rebuild all rows when the
+     *  source generation changed (M3U address edited in Settings). */
+    private var continueAdapter: ArrayObjectAdapter? = null
+    private var lastRenderedGeneration: Int = -1
+    private var lastHistorySnapshot: List<WatchRecord> = emptyList()
+
+    override fun onResume() {
+        super.onResume()
+        // R13-D: the M3U address was edited in Settings — the old
+        // playlist is still on screen until the rows are rebuilt.
+        if (lastRenderedGeneration >= 0 &&
+            AppSources.sourceGeneration != lastRenderedGeneration
+        ) {
+            loadRows()
+            return
+        }
+        // R13-C: watching something and coming back should show the new
+        // breakpoint without an app restart; only touch the row when
+        // the history actually changed, so focus is not disturbed.
+        refreshContinueRowIfChanged()
+    }
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
         super.onActivityCreated(savedInstanceState)
@@ -70,7 +94,20 @@ class HomeFragment : BrowseSupportFragment() {
                     Intent(requireContext(), VodBrowseActivity::class.java)
                         .putExtra(VodBrowseActivity.EXTRA_CATEGORY_ID, item.id),
                 )
+                // R13-C: a continue-watching card opens the title's
+                // detail page, whose play button already offers
+                // "继续播放" at the saved breakpoint.
+                is WatchRecord -> startActivity(
+                    Intent(requireContext(), VodDetailActivity::class.java)
+                        .putExtra(VodDetailActivity.EXTRA_VOD_ID, item.vodId),
+                )
                 is HomeAction -> when (item.id) {
+                    // R13-C: the empty continue row is a card, not a
+                    // dead hint — tapping it opens the VOD browser.
+                    "continue_empty" -> startActivity(
+                        Intent(requireContext(), VodBrowseActivity::class.java)
+                            .putExtra(VodBrowseActivity.EXTRA_CATEGORY_ID, "all"),
+                    )
                     "test_stream" -> startActivity(
                         Intent(requireContext(), PlayerActivity::class.java)
                             .putExtra(PlayerActivity.EXTRA_URL, PlaceholderData.TEST_STREAM_URL)
@@ -101,6 +138,11 @@ class HomeFragment : BrowseSupportFragment() {
         // onActivityCreated) rather than inside the coroutine, so a
         // destroyed view can never make requireContext() throw.
         val liveSource = AppSources.source(requireContext())
+        // R13-C/D: snapshot the generation this load renders for, and
+        // the history it shows, so onResume knows what changed.
+        lastRenderedGeneration = AppSources.sourceGeneration
+        val historySnapshot = AppSources.library(requireContext()).history()
+        lastHistorySnapshot = historySnapshot
         viewLifecycleOwner.lifecycleScope.launch {
             // Real live channels (M3U). Both loaders are fail-soft
             // and never throw: an empty real list means the playlist
@@ -112,8 +154,9 @@ class HomeFragment : BrowseSupportFragment() {
             val categories = source.categories()
             val rowsAdapter = ArrayObjectAdapter(ListRowPresenter())
 
-            val continueAdapter = ArrayObjectAdapter(TextCardPresenter())
-            continueAdapter.add("暂无观看记录，去「点播」看看吧")
+            val continueAdapter = ArrayObjectAdapter(PosterCardPresenter())
+            fillContinueRow(continueAdapter, historySnapshot)
+            this@HomeFragment.continueAdapter = continueAdapter
             rowsAdapter.add(ListRow(HeaderItem(0, "继续观看"), continueAdapter))
 
             val liveAdapter = ArrayObjectAdapter(PosterCardPresenter())
@@ -136,6 +179,34 @@ class HomeFragment : BrowseSupportFragment() {
         }
     }
 
+    /**
+     * R13-C: the "继续观看" row shows real breakpoints from the library
+     * (round 12 resume), most recent first, capped so the row stays
+     * scannable. Only records with a usable resume position count —
+     * a finished episode's record is already dropped by the store, and
+     * a sub-10s stop is not a breakpoint. Empty history shows one card
+     * that opens the VOD browser instead of a dead text hint.
+     */
+    private fun fillContinueRow(adapter: ArrayObjectAdapter, history: List<WatchRecord>) {
+        adapter.clear()
+        val resumable = history.filter { it.resumePositionMs() > 0L }.take(MAX_CONTINUE_ITEMS)
+        if (resumable.isEmpty()) {
+            adapter.add(HomeAction("continue_empty", "暂无观看记录", "去「点播」看看吧"))
+        } else {
+            resumable.forEach { adapter.add(it) }
+        }
+    }
+
+    /** R13-C: rebuild the continue row in place when history changed. */
+    private fun refreshContinueRowIfChanged() {
+        val adapter = continueAdapter ?: return
+        val context = context ?: return
+        val current = AppSources.library(context).history()
+        if (current == lastHistorySnapshot) return
+        lastHistorySnapshot = current
+        fillContinueRow(adapter, current)
+    }
+
     private fun checkForUpdate() {
         viewLifecycleOwner.lifecycleScope.launch {
             val result = UpdateChecker().check()
@@ -155,5 +226,10 @@ class HomeFragment : BrowseSupportFragment() {
                 .setPositiveButton("确定", null)
                 .show()
         }
+    }
+
+    companion object {
+        /** "继续观看" row shows at most this many breakpoints. */
+        private const val MAX_CONTINUE_ITEMS = 10
     }
 }
