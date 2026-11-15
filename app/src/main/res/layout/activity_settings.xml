@@ -35,6 +35,27 @@
         android:textColorHint="@color/orion_text_dim"
         android:textSize="@dimen/orion_text_body" />
 
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="@string/skip_intro_label"
+        android:textColor="@color/orion_text"
+        android:textSize="@dimen/orion_text_body" />
+
+    <EditText
+        android:id="@+id/skip_intro_seconds_input"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:hint="@string/skip_intro_seconds_hint"
+        android:inputType="number"
+        android:textColor="@color/orion_text"
+        android:textColorHint="@color/orion_text_dim"
+        android:textSize="@dimen/orion_text_body" />
+
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
