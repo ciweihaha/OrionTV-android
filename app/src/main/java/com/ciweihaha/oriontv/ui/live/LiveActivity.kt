@@ -126,8 +126,12 @@ class LiveActivity : AppCompatActivity() {
         // channel. A stale / placeholder id falls through to the
         // previously selected channel, then the first real one — the
         // caller (HomeFragment) no longer passes placeholder ids at all.
+        // R14-C: no id from anywhere — resume the last channel the
+        // viewer was on (LibraryStore.lastLiveChannelId), so reopening
+        // live TV does not always drop back to channel 001.
         val initialId = intent.getStringExtra(EXTRA_CHANNEL_ID)
         val target = list.find { it.id == initialId }
+            ?: list.find { it.id == AppSources.library(this).lastLiveChannelId }
             ?: list.find { it.id == selected?.id }
             ?: list.firstOrNull()
         select(target)
@@ -153,6 +157,11 @@ class LiveActivity : AppCompatActivity() {
     private fun select(channel: Channel?) {
         selected = channel
         if (channel == null) return
+        // R14-C: remember the channel being viewed — reopening live TV
+        // resumes here instead of channel 001. Saved on focus (the
+        // channel on screen is the one the viewer is on); a stale id
+        // simply never matches a fresh list.
+        AppSources.library(this).lastLiveChannelId = channel.id
         binding.detailName.text = channel.name
         binding.detailGroup.text = channel.group
         binding.playButton.isEnabled = channel.streamUrl != null
