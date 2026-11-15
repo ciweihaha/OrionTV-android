@@ -8,6 +8,8 @@ data class Channel(
     val group: String,
     val logoUrl: String? = null,
     val streamUrl: String? = null,
+    /** The `tvg-id` from the M3U `#EXTINF:` line (round 1); null when the playlist has none. */
+    val tvgId: String? = null,
 )
 
 /** One EPG programme. Times are epoch milliseconds. */
@@ -58,6 +60,49 @@ data class VodPage(
     val items: List<VodItem>,
     val hasMore: Boolean,
 )
+
+/** A favourited title (round 1, LibraryStore). */
+data class FavoriteItem(
+    val vodId: String,
+    val title: String,
+    val posterUrl: String? = null,
+    val year: String? = null,
+    val remarks: String? = null,
+    val savedAtMs: Long = 0L,
+)
+
+/** One watch-progress record (round 1, LibraryStore). */
+data class WatchRecord(
+    val vodId: String,
+    val title: String,
+    val posterUrl: String? = null,
+    val episodeIndex: Int = 1,
+    val episodeTitle: String = "",
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val updatedAtMs: Long = 0L,
+) {
+    /**
+     * Resume position: only when the viewer is genuinely mid-episode.
+     * Too close to the start (under [RESUME_START_THRESHOLD_MS]) or too
+     * close to the end (within [RESUME_END_MARGIN_MS] of it), or with an
+     * unknown duration (live), start from the beginning instead.
+     */
+    fun resumePositionMs(): Long {
+        if (durationMs <= 0L) return 0L
+        if (positionMs < RESUME_START_THRESHOLD_MS) return 0L
+        if (positionMs >= durationMs - RESUME_END_MARGIN_MS) return 0L
+        return positionMs
+    }
+
+    companion object {
+        /** Under 10s in: treat as not started. */
+        const val RESUME_START_THRESHOLD_MS = 10_000L
+
+        /** Within 60s of the end: treat as finished. */
+        const val RESUME_END_MARGIN_MS = 60_000L
+    }
+}
 
 /** Home-row action cards (player test stream, update check). */
 data class HomeAction(val id: String, val title: String, val subtitle: String)
