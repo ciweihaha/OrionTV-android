@@ -18,9 +18,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.ciweihaha.oriontv.R
 import com.ciweihaha.oriontv.data.AppSources
 import com.ciweihaha.oriontv.data.model.VodItem
+import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivitySearchBinding
 import com.ciweihaha.oriontv.ui.common.PosterArt
+import com.ciweihaha.oriontv.ui.common.PosterLoader
 import com.ciweihaha.oriontv.ui.vod.VodDetailActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 /**
@@ -74,22 +78,34 @@ class SearchActivity : AppCompatActivity() {
             Toast.makeText(this, "请输入片名", Toast.LENGTH_SHORT).show()
             return
         }
-        val config = AppSources.config(this)
-        if (!config.isVodConfigured) {
-            binding.emptyHint.visibility = View.VISIBLE
-            binding.emptyHint.text = "未配置点播源，请先到「设置」添加 TVBox 源地址"
-            return
-        }
         searching = true
-        binding.emptyHint.visibility = View.GONE
+        // R13-H: the "搜索中…" text used to be set while the hint stayed
+        // GONE, so a search showed stale results / blank with no loading
+        // state at all. Show it now; the completion path hides it again.
+        binding.emptyHint.visibility = View.VISIBLE
         binding.emptyHint.text = "搜索中…"
         lifecycleScope.launch {
-            val source = AppSources.source(this@SearchActivity)
-            val items = runCatching { source.search(query, 1) }.getOrDefault(emptyList())
+            // R13-G: search the agg catalogue first — it is the default
+            // VOD, so search works out of the box with no TVBox source
+            // configured (previously the screen just told the user to
+            // configure one). When a TVBox source IS configured, search
+            // it too and merge, agg results first, deduped by id.
+            val config = AppSources.config(this@SearchActivity)
+            val aggDeferred = async {
+                runCatching { AggSourceRepository().search(query, 1) }.getOrDefault(emptyList())
+            }
+            val tvBoxDeferred = async {
+                if (!config.isVodConfigured) emptyList()
+                else {
+                    val source = AppSources.source(this@SearchActivity)
+                    runCatching { source.search(query, 1) }.getOrDefault(emptyList())
+                }
+            }
+            val items = (aggDeferred.await() + tvBoxDeferred.await()).distinctBy { it.id }
             searching = false
             AppSources.library(this@SearchActivity).addSearchQuery(query)
             refreshHistory()
-            binding.resultGrid.adapter = PosterAdapter(items) { item ->
+            binding.resultGrid.adapter = PosterAdapter(lifecycleScope, items) { item ->
                 startActivity(
                     Intent(this@SearchActivity, VodDetailActivity::class.java)
                         .putExtra(VodDetailActivity.EXTRA_VOD_ID, item.id),
@@ -126,6 +142,7 @@ class SearchActivity : AppCompatActivity() {
     }
 
     private class PosterAdapter(
+        private val scope: CoroutineScope,
         private val items: List<VodItem>,
         private val onClick: (VodItem) -> Unit,
     ) : RecyclerView.Adapter<PosterAdapter.Holder>() {
@@ -145,11 +162,18 @@ class SearchActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val item = items[position]
             val density = holder.itemView.resources.displayMetrics.density
+            // R13-I: the browse screen loads real posters; search used
+            // to show only the generated gradient block even though the
+            // item carries a poster URL. Same pattern as the browser.
             holder.poster.setImageDrawable(
                 PosterArt.make(
                     holder.itemView.context, item.title,
                     (160 * density).toInt(), (240 * density).toInt(),
                 ),
+            )
+            PosterLoader.load(
+                holder.poster, item.posterUrl,
+                (160 * density).toInt(), (240 * density).toInt(), scope,
             )
             holder.title.text = item.title
             holder.meta.text = listOfNotNull(item.year, item.remarks).joinToString(" · ")
