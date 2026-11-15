@@ -3,6 +3,7 @@ package com.ciweihaha.oriontv.data
 import android.content.Context
 import com.ciweihaha.oriontv.data.epg.EpgRepository
 import com.ciweihaha.oriontv.data.epg.XmlTvEpgRepository
+import com.ciweihaha.oriontv.data.settings.AppSettings
 import com.ciweihaha.oriontv.data.source.SourceRepository
 import com.ciweihaha.oriontv.data.source.TvBoxSourceRepository
 
@@ -35,8 +36,14 @@ object AppSources {
         val existing = source
         if (existing != null) return existing
         val cfg = config(context)
+        // Live URL: the address saved in Settings wins; with nothing
+        // saved yet, the built-in default (the user's own live.m3u).
+        // LiveActivity resolves the same rule, so both screens always
+        // load the same playlist and channel ids match.
+        val liveUrl = AppSettings(context).getM3uUrl().takeIf { !it.isNullOrBlank() }
+            ?: cfg.liveM3uUrl
         return TvBoxSourceRepository(
-            liveM3uUrl = cfg.liveM3uUrl,
+            liveM3uUrl = liveUrl,
             vodApiUrl = cfg.vodApiUrl,
         ).also { source = it }
     }
