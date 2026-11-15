@@ -42,6 +42,9 @@ data class Episode(
     val title: String,
     /** Playable URL; null for placeholder episodes without one. */
     val url: String? = null,
+    /** Which `$$$` source group this episode came from (M12); null for
+     *  placeholder episodes that have no source. */
+    val source: String? = null,
 )
 
 data class VodDetail(
