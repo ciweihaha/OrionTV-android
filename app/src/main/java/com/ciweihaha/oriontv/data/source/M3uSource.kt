@@ -141,6 +141,12 @@ class M3uDiskCache(private val cacheDir: File) {
         put("name", name)
         put("group", group)
         put("logo", logoUrl ?: "")
+        // R15-C: tvgId used to be dropped on the round-trip, so a channel
+        // served from the offline cache had no EPG identity (its "now
+        // playing" was empty until the network came back). Old cache
+        // files simply lack the key -> optString defaults to "" and the
+        // entry still loads.
+        put("tvgId", tvgId ?: "")
         put("url", streamUrl ?: "")
     }
 
@@ -154,6 +160,7 @@ class M3uDiskCache(private val cacheDir: File) {
             group = optString("group", "Default"),
             logoUrl = optString("logo", "").takeIf { it.isNotEmpty() },
             streamUrl = url,
+            tvgId = optString("tvgId", "").takeIf { it.isNotEmpty() },
         )
     }
 
