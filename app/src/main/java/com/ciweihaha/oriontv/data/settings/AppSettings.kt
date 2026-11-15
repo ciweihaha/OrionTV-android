@@ -26,7 +26,7 @@ fun normalizeM3uUrl(raw: String): String? {
     }
 }
 
-/** App settings backed by SharedPreferences. Only the M3U live source for now. */
+/** App settings backed by SharedPreferences. M3U live source + skip-intro. */
 class AppSettings(context: Context) {
 
     private val prefs: SharedPreferences =
@@ -38,8 +38,24 @@ class AppSettings(context: Context) {
         prefs.edit().putString(KEY_M3U_URL, url).apply()
     }
 
+    /**
+     * 默认片头时长（秒）：点播没有学过的片头落点时，跳过按钮按这个窗口显示；
+     * 0 表示不跳过（不显示跳过按钮）。与原生版 INTRO_SKIP_SECONDS 默认值一致。
+     */
+    fun getSkipIntroSeconds(): Int =
+        prefs.getInt(KEY_SKIP_INTRO_SECONDS, DEFAULT_SKIP_INTRO_SECONDS)
+
+    fun setSkipIntroSeconds(seconds: Int) {
+        prefs.edit()
+            .putInt(KEY_SKIP_INTRO_SECONDS, seconds.coerceIn(0, MAX_SKIP_INTRO_SECONDS))
+            .apply()
+    }
+
     companion object {
         const val PREFS_NAME = "oriontv_settings"
         const val KEY_M3U_URL = "m3u_url"
+        const val KEY_SKIP_INTRO_SECONDS = "skip_intro_seconds"
+        const val DEFAULT_SKIP_INTRO_SECONDS = 90
+        const val MAX_SKIP_INTRO_SECONDS = 600
     }
 }
