@@ -15,6 +15,7 @@ import com.ciweihaha.oriontv.data.epg.PlaceholderEpgRepository
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.Program
 import com.ciweihaha.oriontv.data.settings.AppSettings
+import com.ciweihaha.oriontv.data.source.LiveLines
 import com.ciweihaha.oriontv.data.source.M3uDiskCache
 import com.ciweihaha.oriontv.data.source.M3uSource
 import com.ciweihaha.oriontv.data.source.PlaceholderSourceRepository
@@ -77,10 +78,20 @@ class LiveActivity : AppCompatActivity() {
         binding.playButton.setOnClickListener {
             val channel = selected ?: return@setOnClickListener
             val url = channel.streamUrl ?: return@setOnClickListener
+            // Multi-line (round 9): same-name entries in the playlist are
+            // the channel's alternate lines; hand them all to the player
+            // so it can switch without leaving playback.
+            val lines = LiveLines.linesFor(channels, channel)
+            val lineIndex = LiveLines.indexOf(lines, channel)
             startActivity(
                 Intent(this, PlayerActivity::class.java)
                     .putExtra(PlayerActivity.EXTRA_URL, url)
-                    .putExtra(PlayerActivity.EXTRA_TITLE, channel.name),
+                    .putExtra(PlayerActivity.EXTRA_TITLE, channel.name)
+                    .putStringArrayListExtra(
+                        PlayerActivity.EXTRA_LINE_URLS,
+                        ArrayList(lines.mapNotNull { it.streamUrl }),
+                    )
+                    .putExtra(PlayerActivity.EXTRA_LINE_INDEX, lineIndex),
             )
         }
     }
