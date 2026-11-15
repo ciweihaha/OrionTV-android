@@ -153,10 +153,19 @@ class VodDetailActivity : AppCompatActivity() {
         }
         val firstPlayable = episodes.firstOrNull { !it.url.isNullOrBlank() }
         binding.playButton.isEnabled = firstPlayable != null
-        // Resume (round 12): the play button offers to continue when this
-        // episode already has a usable breakpoint.
-        val resumeMs = firstPlayable?.let {
-            AppSources.library(this).progressFor(detail.item.id, it.index)?.resumePositionMs()
+        // Resume (round 12, P2-1 fix): the play button resumes the most
+        // recently watched episode instead of always episode 1; fall back
+        // to the first playable episode when there is no usable breakpoint.
+        val library = AppSources.library(this)
+        val latest = library.latestProgressFor(detail.item.id)
+        val resumeEpisode = latest?.let { record ->
+            episodes.firstOrNull {
+                it.index == record.episodeIndex && !it.url.isNullOrBlank()
+            }?.takeIf { record.resumePositionMs() > 0L }
+        }
+        val targetEpisode = resumeEpisode ?: firstPlayable
+        val resumeMs = targetEpisode?.let {
+            library.progressFor(detail.item.id, it.index)?.resumePositionMs()
         } ?: 0L
         binding.playButton.text = when {
             firstPlayable == null -> "暂无可播放剧集"
@@ -164,7 +173,7 @@ class VodDetailActivity : AppCompatActivity() {
             else -> "播放"
         }
         binding.playButton.setOnClickListener {
-            firstPlayable?.let { playEpisode(detail.item.title, it) }
+            targetEpisode?.let { playEpisode(detail.item.title, it) }
         }
     }
 
