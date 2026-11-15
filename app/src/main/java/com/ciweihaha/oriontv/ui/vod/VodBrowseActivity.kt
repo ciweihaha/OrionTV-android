@@ -25,6 +25,11 @@ import kotlinx.coroutines.launch
  * Categories and items come from the agg CMS source (stage 2); the
  * repository fails soft to an empty list, shown via [emptyHint].
  * Detail opens the Hero page.
+ *
+ * Pagination (round 9): the poster wall loads page 1, then keeps
+ * appending pages as the user scrolls near the end, until the CMS
+ * reports the last page. A failed page load keeps the previous state,
+ * so scrolling can retry it; switching category resets to page 1.
  */
 class VodBrowseActivity : AppCompatActivity() {
 
@@ -32,6 +37,9 @@ class VodBrowseActivity : AppCompatActivity() {
     private val source = AggSourceRepository()
     private var selectedCategory = "all"
     private lateinit var categoryAdapter: CategoryAdapter
+    private lateinit var posterAdapter: PosterAdapter
+    private lateinit var gridLayoutManager: GridLayoutManager
+    private val paging = PagingState()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,7 +48,23 @@ class VodBrowseActivity : AppCompatActivity() {
 
         binding.categoryList.layoutManager =
             LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
-        binding.posterGrid.layoutManager = GridLayoutManager(this, 6)
+        gridLayoutManager = GridLayoutManager(this, 6)
+        binding.posterGrid.layoutManager = gridLayoutManager
+        posterAdapter = PosterAdapter { item ->
+            startActivity(
+                Intent(this@VodBrowseActivity, VodDetailActivity::class.java)
+                    .putExtra(VodDetailActivity.EXTRA_VOD_ID, item.id),
+            )
+        }
+        binding.posterGrid.adapter = posterAdapter
+        binding.posterGrid.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                val lastVisible = gridLayoutManager.findLastVisibleItemPosition()
+                if (paging.shouldLoadMore(lastVisible, posterAdapter.itemCount)) {
+                    loadPage(paging.nextPage)
+                }
+            }
+        })
 
         lifecycleScope.launch {
             val categories = source.categories()
@@ -49,24 +73,44 @@ class VodBrowseActivity : AppCompatActivity() {
                 selectedCategory = category.id
                 categoryAdapter.selectedId = category.id
                 categoryAdapter.notifyDataSetChanged()
-                loadItems()
+                paging.reset()
+                posterAdapter.setItems(emptyList())
+                binding.emptyHint.visibility = View.GONE
+                loadPage(1)
             }
             binding.categoryList.adapter = categoryAdapter
-            loadItems()
+            loadPage(1)
         }
     }
 
-    private fun loadItems() {
+    private fun loadPage(page: Int) {
+        if (!paging.canLoadMore()) return
+        paging.onLoadStarted()
+        updateLoadingMore()
         lifecycleScope.launch {
-            val items = source.browse(selectedCategory, 1)
-            binding.posterGrid.adapter = PosterAdapter(items) { item ->
-                startActivity(
-                    Intent(this@VodBrowseActivity, VodDetailActivity::class.java)
-                        .putExtra(VodDetailActivity.EXTRA_VOD_ID, item.id),
-                )
+            val result = source.browsePaged(selectedCategory, page)
+            if (result.items.isEmpty() && page > 1) {
+                // An empty follow-up page is a failed load, not the end of
+                // the list: keep the previous page/hasMore so scrolling can
+                // retry it instead of stopping pagination for good.
+                paging.onLoadFailed()
+            } else {
+                paging.onPageLoaded(page, result.hasMore)
+                if (page == 1) {
+                    posterAdapter.setItems(result.items)
+                } else {
+                    posterAdapter.appendItems(result.items)
+                }
+                binding.emptyHint.visibility =
+                    if (posterAdapter.itemCount == 0) View.VISIBLE else View.GONE
             }
-            binding.emptyHint.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+            updateLoadingMore()
         }
+    }
+
+    private fun updateLoadingMore() {
+        binding.loadingMore.visibility =
+            if (paging.isLoading && paging.currentPage > 0) View.VISIBLE else View.GONE
     }
 
     private class CategoryAdapter(
@@ -98,14 +142,28 @@ class VodBrowseActivity : AppCompatActivity() {
     }
 
     private class PosterAdapter(
-        private val items: List<VodItem>,
         private val onClick: (VodItem) -> Unit,
     ) : RecyclerView.Adapter<PosterAdapter.Holder>() {
+
+        private val items = mutableListOf<VodItem>()
 
         class Holder(view: View) : RecyclerView.ViewHolder(view) {
             val poster: ImageView = view.findViewById(R.id.poster_image)
             val title: TextView = view.findViewById(R.id.poster_title)
             val meta: TextView = view.findViewById(R.id.poster_meta)
+        }
+
+        fun setItems(newItems: List<VodItem>) {
+            items.clear()
+            items.addAll(newItems)
+            notifyDataSetChanged()
+        }
+
+        fun appendItems(newItems: List<VodItem>) {
+            if (newItems.isEmpty()) return
+            val start = items.size
+            items.addAll(newItems)
+            notifyItemRangeInserted(start, newItems.size)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
