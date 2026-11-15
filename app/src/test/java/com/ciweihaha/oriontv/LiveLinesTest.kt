@@ -59,6 +59,28 @@ class LiveLinesTest {
     }
 
     @Test
+    fun `indexOf returns minus one when the channel is not among the lines`() {
+        val lines = LiveLines.linesFor(playlist, playlist[0])
+        val absent = channel("湖南卫视", "https://example.com/hunan.m3u8")
+        assertEquals(-1, LiveLines.indexOf(lines, absent))
+        assertEquals(-1, LiveLines.indexOf(emptyList(), playlist[0]))
+    }
+
+    @Test
+    fun `linesFor matches names ignoring spaces and case`() {
+        val mixed = listOf(
+            channel("CCTV-1 高清", "https://example.com/a.m3u8"),
+            channel("cctv-1高清", "https://example.com/b.m3u8"),
+            channel("CCTV-1", "https://example.com/c.m3u8"),
+        )
+        val lines = LiveLines.linesFor(mixed, mixed[0])
+        assertEquals(
+            listOf("https://example.com/a.m3u8", "https://example.com/b.m3u8"),
+            lines.map { it.streamUrl },
+        )
+    }
+
+    @Test
     fun `nextIndex wraps around to the first line`() {
         assertEquals(1, LiveLines.nextIndex(0, 3))
         assertEquals(2, LiveLines.nextIndex(1, 3))
