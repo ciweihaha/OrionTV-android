@@ -518,7 +518,14 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun hideControls() {
-        if (seekPreview?.hasPending == true) return // keep bar while previewing
+        if (seekPreview?.hasPending == true) {
+            // R16-A: re-arm instead of dropping the hide — the old code
+            // returned here without re-posting, so the controls bar
+            // could stay visible indefinitely after a preview
+            // auto-committed (the 4s timer had already fired).
+            handler.postDelayed(hideControlsRunnable, SeekPreviewController.AUTO_COMMIT_MS)
+            return
+        }
         binding.controlsBar.visibility = View.GONE
         binding.playerTitle.visibility = View.GONE
     }

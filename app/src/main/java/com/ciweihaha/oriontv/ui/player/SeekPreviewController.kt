@@ -7,8 +7,7 @@ package com.ciweihaha.oriontv.ui.player
  * Behaviour: while the control bar is visible, DPAD left/right moves a
  * *pending* target in 10-second steps and shows a preview bubble with the
  * direction and the landing time. Nothing seeks yet. DPAD_CENTER commits
- * the jump; BACK (or a second press of the opposite key past the origin)
- * cancels. The preview auto-commits after [AUTO_COMMIT_MS] of no input so
+ * the jump; BACK cancels. The preview auto-commits after [AUTO_COMMIT_MS] of no input so
  * the player never looks stuck.
  */
 class SeekPreviewController(private val durationMs: Long) {
