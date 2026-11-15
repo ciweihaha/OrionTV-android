@@ -11,7 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ciweihaha.oriontv.R
-import com.ciweihaha.oriontv.data.epg.PlaceholderEpgRepository
+import com.ciweihaha.oriontv.data.AppSources
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.Program
 import com.ciweihaha.oriontv.data.settings.AppSettings
@@ -33,13 +33,15 @@ import java.util.Locale
  * Channels come from the configured M3U source (settings): cached list
  * renders instantly, then a refresh updates it. With no M3U address
  * configured (or when both cache and network are empty) the stage-1
- * placeholder channels are shown instead. EPG is still placeholder.
+ * placeholder channels are shown instead. EPG is the real XMLTV feed
+ * (round 1); it shows "—" when the feed has no programme for a channel.
  */
 class LiveActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLiveBinding
     private val source = PlaceholderSourceRepository()
-    private val epg = PlaceholderEpgRepository()
+    /** Round 1: real XMLTV EPG (https://ysp.ciweihaha.win/epg.xml). */
+    private val epg by lazy { AppSources.epg(this) }
     private val settings by lazy { AppSettings(this) }
     private val m3uSource by lazy {
         M3uSource(diskCache = M3uDiskCache(File(cacheDir, "m3u")))
