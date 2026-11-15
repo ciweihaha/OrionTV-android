@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ciweihaha.oriontv.R
 import com.ciweihaha.oriontv.data.AppSources
+import com.ciweihaha.oriontv.data.SourceConfig
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.Program
 import com.ciweihaha.oriontv.data.settings.AppSettings
@@ -60,28 +61,30 @@ class LiveActivity : AppCompatActivity() {
         binding.channelList.layoutManager = LinearLayoutManager(this)
 
         lifecycleScope.launch {
-            val m3uUrl = settings.getM3uUrl()
-            if (m3uUrl.isNullOrBlank()) {
+            // No M3U saved in Settings yet: fall back to the built-in
+            // default (the user's own live.m3u) instead of demo
+            // channels, so the app plays straight after install with
+            // no setup. This is the same address HomeFragment's live
+            // row loads (see AppSources.source), so a channel id
+            // passed from home always matches this list.
+            val m3uUrl = settings.getM3uUrl().takeIf { !it.isNullOrBlank() }
+                ?: SourceConfig.DEFAULT_LIVE_M3U
+            val cached = m3uSource.getCached(m3uUrl)
+            if (cached.isNotEmpty()) {
                 m3uFailedFallback = false
+                binding.sourceNote.visibility = View.GONE
+                showChannels(cached)
+            }
+            val fresh = m3uSource.refresh(m3uUrl)
+            if (fresh.isNotEmpty()) {
+                m3uFailedFallback = false
+                binding.sourceNote.visibility = View.GONE
+                showChannels(fresh)
+            } else if (cached.isEmpty()) {
+                m3uFailedFallback = true
+                binding.sourceNote.text = getString(R.string.m3u_load_failed)
+                binding.sourceNote.visibility = View.VISIBLE
                 showChannels(source.channels())
-            } else {
-                val cached = m3uSource.getCached(m3uUrl)
-                if (cached.isNotEmpty()) {
-                    m3uFailedFallback = false
-                    binding.sourceNote.visibility = View.GONE
-                    showChannels(cached)
-                }
-                val fresh = m3uSource.refresh(m3uUrl)
-                if (fresh.isNotEmpty()) {
-                    m3uFailedFallback = false
-                    binding.sourceNote.visibility = View.GONE
-                    showChannels(fresh)
-                } else if (cached.isEmpty()) {
-                    m3uFailedFallback = true
-                    binding.sourceNote.text = getString(R.string.m3u_load_failed)
-                    binding.sourceNote.visibility = View.VISIBLE
-                    showChannels(source.channels())
-                }
             }
         }
 
