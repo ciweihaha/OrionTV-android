@@ -5,6 +5,7 @@ import com.ciweihaha.oriontv.data.model.VodDetail
 import com.ciweihaha.oriontv.data.model.VodItem
 import com.ciweihaha.oriontv.data.model.VodPage
 import com.ciweihaha.oriontv.data.model.Channel
+import kotlinx.coroutines.CancellationException
 
 /**
  * VOD from agg (Apple CMS); live channels come from the M3U source when
@@ -13,9 +14,12 @@ import com.ciweihaha.oriontv.data.model.Channel
  *
  * Categories come from the `class` array of `videolist(t=1, pg=1)`:
  * 1 电影 / 2 电视剧 / 3 动漫 / 4 综艺 / 108 儿童启蒙, with "全部"
- * prepended. "全部" maps to `t=1` (the default first page, same as the
- * reference home). Failures are fail-soft: empty list / null, never a
- * throw — the UI shows its empty state instead of crashing.
+ * prepended. "全部" is NOT a type filter (M7 — it used to map to `t=1`,
+ * so "全部" only ever returned movies): it fetches every known type
+ * for the page and merges them. Failures are fail-soft: empty list /
+ * null, never a throw — the UI shows its empty state instead of
+ * crashing. Cancellation is never swallowed: it is rethrown so a
+ * destroyed screen stops instead of silently returning empty data.
  *
  * Pagination (round 9): [browsePaged] reports `hasMore` from the CMS
  * `pagecount`, so the browse screen can keep loading pages until the
@@ -29,16 +33,16 @@ class AggSourceRepository(
     private var cachedCategories: List<VodCategory>? = null
 
     override suspend fun channels(): List<Channel> =
-        runCatching { channelSource.channels() }.getOrDefault(emptyList())
+        failSoft(emptyList()) { channelSource.channels() }
 
     override suspend fun categories(): List<VodCategory> {
         cachedCategories?.let { return it }
-        val result = runCatching {
+        val result = failSoft(emptyList()) {
             val first = client.videolist(1, 1)
             val list = mutableListOf(VodCategory("all", "全部"))
             first.classes.forEach { list += VodCategory(it.typeId.toString(), it.typeName) }
             list.toList()
-        }.getOrDefault(emptyList())
+        }
         if (result.isNotEmpty()) cachedCategories = result
         return result
     }
@@ -47,24 +51,67 @@ class AggSourceRepository(
         browsePaged(categoryId, page).items
 
     override suspend fun browsePaged(categoryId: String, page: Int): VodPage =
-        runCatching {
-            val type = categoryId.toIntOrNull() ?: 1
-            val result = client.videolist(type, page.coerceAtLeast(1))
-            VodPage(
+        failSoft(VodPage(emptyList(), hasMore = false)) {
+            val type = categoryId.toIntOrNull()
+            if (type == null) {
+                browseAll(page)
+            } else {
+                val result = client.videolist(type, page.coerceAtLeast(1))
+                VodPage(
+                    items = result.list.map { it.toVodItem() },
+                    hasMore = result.page < result.pageCount,
+                )
+            }
+        }
+
+    /**
+     * M7: "全部" (or any non-numeric category id) fetches page [page] of
+     * every known type and merges them, instead of pretending "全部" is
+     * t=1 (movies only). `hasMore` is true while any type has another
+     * page. When the type list itself cannot be loaded, fall back to
+     * the old single-type (t=1) fetch rather than returning nothing.
+     */
+    private suspend fun browseAll(page: Int): VodPage {
+        val types = categories().mapNotNull { it.id.toIntOrNull() }
+        if (types.isEmpty()) {
+            val result = client.videolist(1, page.coerceAtLeast(1))
+            return VodPage(
                 items = result.list.map { it.toVodItem() },
                 hasMore = result.page < result.pageCount,
             )
-        }.getOrDefault(VodPage(emptyList(), hasMore = false))
+        }
+        val items = mutableListOf<VodItem>()
+        var hasMore = false
+        for (type in types) {
+            val result = client.videolist(type, page.coerceAtLeast(1))
+            items += result.list.map { it.toVodItem() }
+            if (result.page < result.pageCount) hasMore = true
+        }
+        return VodPage(items, hasMore)
+    }
 
-    override suspend fun detail(vodId: String): VodDetail? =
-        runCatching {
-            val item = client.detail(vodId) ?: return@runCatching null
-            VodDetail(
-                item = item.toVodItem(),
-                description = item.content?.takeIf { it.isNotBlank() } ?: item.blurb,
-                episodes = client.parseEpisodes(item.playFrom, item.playUrl),
-            )
-        }.getOrNull()
+    override suspend fun detail(vodId: String): VodDetail? = try {
+        val item = client.detail(vodId) ?: return null
+        VodDetail(
+            item = item.toVodItem(),
+            description = item.content?.takeIf { it.isNotBlank() } ?: item.blurb,
+            episodes = client.parseEpisodes(item.playFrom, item.playUrl),
+        )
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Fail-soft helper that never swallows coroutine cancellation. */
+    private suspend inline fun <T> failSoft(default: T, block: suspend () -> T): T =
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            default
+        }
 
     private fun AggCmsClient.VideoItem.toVodItem(): VodItem = VodItem(
         id = vodId,

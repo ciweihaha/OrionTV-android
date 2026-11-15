@@ -9,12 +9,16 @@ import com.ciweihaha.oriontv.data.model.Channel
  * mirror the React Native reference (`services/m3u.ts#parseM3U`) exactly:
  *
  * - A channel starts at `#EXTINF:` and ends at the next non-`#` line that
- *   contains `://` (the stream URL).
+ *   contains `://` (the stream URL). The directive match is
+ *   case-insensitive: some playlists write `#extinf:` and those channels
+ *   used to be dropped entirely.
  * - The name is the text after the first comma that is NOT inside double
  *   quotes (attribute values and names may themselves contain commas,
  *   e.g. `group-title="A,B"` or `CCTV-1,高清`).
  * - `tvg-logo` / `group-title` attributes are read case-insensitively.
- * - A stream URL seen twice keeps only its first entry (dedup by URL).
+ * - A stream URL seen twice keeps a single entry, but every distinct
+ *   name it appeared under is merged into that entry ("CCTV-1 /
+ *   CCTV-1 高清") instead of silently dropping the later names.
  * - Missing name → "Unknown", missing group → "Default", missing logo → null.
  * - `#EXTINF:` without a comma yields an empty name (→ "Unknown").
  * - A URL line with no preceding `#EXTINF:` is skipped.
@@ -32,26 +36,37 @@ object M3uParser {
 
     fun parse(text: String): List<Channel> {
         val channels = mutableListOf<Channel>()
-        val seenUrls = HashSet<String>()
+        val seenUrls = HashMap<String, Int>()
         var pending: PendingChannel? = null
 
         for (rawLine in text.split('\n')) {
             val line = rawLine.trim()
-            if (line.startsWith("#EXTINF:")) {
+            if (line.startsWith("#EXTINF:", ignoreCase = true)) {
                 pending = parseExtinf(line)
             } else if (pending != null && line.isNotEmpty() &&
                 !line.startsWith("#") && line.contains("://")
             ) {
                 val url = line
-                if (seenUrls.add(url)) {
+                val name = pending.name.ifEmpty { "Unknown" }
+                val existingIndex = seenUrls[url]
+                if (existingIndex == null) {
+                    seenUrls[url] = channels.size
                     channels += Channel(
                         id = url,
                         number = "%03d".format(channels.size + 1),
-                        name = pending.name.ifEmpty { "Unknown" },
+                        name = name,
                         group = pending.group.ifEmpty { "Default" },
                         logoUrl = pending.logo.takeIf { it.isNotEmpty() },
                         streamUrl = url,
                     )
+                } else {
+                    // Same stream under another name: keep every name so
+                    // the entry still represents all of them.
+                    val existing = channels[existingIndex]
+                    if (name != existing.name && name !in existing.name.split(" / ")) {
+                        channels[existingIndex] =
+                            existing.copy(name = "${existing.name} / $name")
+                    }
                 }
                 pending = null
             }

@@ -4,6 +4,7 @@ import com.ciweihaha.oriontv.data.model.Episode
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -80,6 +81,10 @@ class AggCmsClient(
             if (attempt > 0) delay(RETRY_DELAY_MS)
             try {
                 return fetcher(url)
+            } catch (e: CancellationException) {
+                // Cancellation is not a failure: never swallow it into a
+                // retry, and never keep retrying after destroy.
+                throw e
             } catch (e: HttpStatusException) {
                 if (e.status in 400..499) throw e
                 lastError = e
@@ -135,25 +140,35 @@ class AggCmsClient(
         optString(key, "").takeIf { it.isNotEmpty() }
 
     /**
-     * Episodes from `vod_play_from` / `vod_play_url` (first source group
-     * only): groups are `$$$`-separated, episodes `#`-separated, each
-     * episode is `title$url`. An episode without `$` keeps its text as
-     * the URL and gets a generated "第 N 集" title.
+     * Episodes from `vod_play_from` / `vod_play_url`, ALL `$$$` source
+     * groups (M12 — previously only the first group was parsed, so a
+     * title with several sources could only ever play the first one).
+     * Groups are `$$$`-separated, episodes `#`-separated, each episode
+     * is `title$url`; the group name comes from the matching
+     * `vod_play_from` entry ("线路 N" when it is missing). An episode
+     * without `$` keeps its text as the URL and gets a generated
+     * "第 N 集" title. Indices restart per source group.
      */
     fun parseEpisodes(playFrom: String, playUrl: String): List<Episode> {
         if (playUrl.isEmpty()) return emptyList()
-        val firstGroup = playUrl.split("\$\$\$").firstOrNull().orEmpty()
-        if (firstGroup.isEmpty()) return emptyList()
-        return firstGroup.split("#").mapIndexedNotNull { index, segment ->
-            if (segment.isEmpty()) return@mapIndexedNotNull null
-            val dollar = segment.indexOf('$')
-            if (dollar == -1) {
-                Episode(index + 1, "第 ${index + 1} 集", segment)
-            } else {
-                val title = segment.substring(0, dollar).ifEmpty { "第 ${index + 1} 集" }
-                Episode(index + 1, title, segment.substring(dollar + 1))
+        val sourceNames = playFrom.split("\$\$\$").map { it.trim() }
+        val episodes = mutableListOf<Episode>()
+        playUrl.split("\$\$\$").forEachIndexed { groupIndex, group ->
+            if (group.isEmpty()) return@forEachIndexed
+            val source = sourceNames.getOrNull(groupIndex)?.takeIf { it.isNotEmpty() }
+                ?: "线路 ${groupIndex + 1}"
+            group.split("#").forEachIndexed { index, segment ->
+                if (segment.isEmpty()) return@forEachIndexed
+                val dollar = segment.indexOf('$')
+                if (dollar == -1) {
+                    episodes += Episode(index + 1, "第 ${index + 1} 集", segment, source)
+                } else {
+                    val title = segment.substring(0, dollar).ifEmpty { "第 ${index + 1} 集" }
+                    episodes += Episode(index + 1, title, segment.substring(dollar + 1), source)
+                }
             }
         }
+        return episodes
     }
 
     companion object {

@@ -5,6 +5,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -34,11 +35,15 @@ class M3uFetcher(
     /** Fetch + parse; never throws — any failure yields an empty list. */
     suspend fun fetchAndParse(m3uUrl: String): List<Channel> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            try {
                 val bytes = fetchBytes(m3uUrl)
-                if (bytes.size > M3uParser.MAX_BYTES) return@runCatching emptyList<Channel>()
+                if (bytes.size > M3uParser.MAX_BYTES) return@withContext emptyList<Channel>()
                 M3uParser.parse(bytes.toString(Charsets.UTF_8))
-            }.getOrDefault(emptyList())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
         }
 
     companion object {
@@ -107,11 +112,20 @@ class M3uDiskCache(private val cacheDir: File) {
         val json = entry.toString()
         if (json.toByteArray(Charsets.UTF_8).size > MAX_CACHE_BYTES) return@runCatching
         cacheDir.mkdirs()
-        cacheFile(m3uUrl).writeText(json, Charsets.UTF_8)
+        // D5: write to a temp file and rename, so a kill mid-write
+        // never leaves a half-written entry behind — the old code
+        // wrote straight to the cache file, and a crash there meant
+        // the next launch lost the whole cached playlist.
+        val target = cacheFile(m3uUrl)
+        val tmp = File(cacheDir, "${target.name}.tmp")
+        tmp.writeText(json, Charsets.UTF_8)
+        if (!tmp.renameTo(target)) tmp.delete()
     }
 
     fun clear() {
-        cacheDir.listFiles()?.forEach { if (it.name.endsWith(".json")) it.delete() }
+        cacheDir.listFiles()?.forEach {
+            if (it.name.endsWith(".json") || it.name.endsWith(".json.tmp")) it.delete()
+        }
     }
 
     internal fun cacheFile(m3uUrl: String): File {
@@ -167,7 +181,11 @@ class M3uSource(
 
     suspend fun getCached(m3uUrl: String): List<Channel> {
         memCache[m3uUrl]?.takeIf { it.isNotEmpty() }?.let { return it }
-        val disk = diskCache.get(m3uUrl)
+        // D5: disk read + JSON parse used to run on the caller's
+        // dispatcher — LiveActivity calls this from the Main scope,
+        // so a multi-thousand-channel playlist parsed on the UI
+        // thread. Disk access belongs on IO.
+        val disk = withContext(Dispatchers.IO) { diskCache.get(m3uUrl) }
         if (!disk.isNullOrEmpty()) {
             memCache[m3uUrl] = disk
             return disk
@@ -179,7 +197,11 @@ class M3uSource(
         val channels = fetcher.fetchAndParse(m3uUrl)
         if (channels.isNotEmpty()) {
             memCache[m3uUrl] = channels
-            runCatching { diskCache.save(m3uUrl, channels) }
+            // D5: same main-thread problem for the write (JSON build
+            // + file write); see getCached.
+            withContext(Dispatchers.IO) {
+                runCatching { diskCache.save(m3uUrl, channels) }
+            }
         }
         return channels
     }
