@@ -4,6 +4,7 @@ import com.ciweihaha.oriontv.data.source.AggCmsClient
 import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -162,5 +163,38 @@ class AggCmsClientTest {
         assertTrue(failing.categories().isEmpty())
         assertTrue(failing.browse("1", 1).isEmpty())
         assertNull(failing.detail("src~111"))
+    }
+
+    @Test
+    fun `browsePaged reports hasMore from pagecount`() = runTest {
+        val lastPageJson = listJson
+            .replace("\"page\":1", "\"page\":700")
+        val client = AggCmsClient(fetcher = { url ->
+            if (url.contains("pg=700")) lastPageJson else listJson
+        })
+        val repo = AggSourceRepository(client = client)
+        val first = repo.browsePaged("1", 1)
+        assertEquals(2, first.items.size)
+        assertTrue(first.hasMore)
+        val last = repo.browsePaged("1", 700)
+        assertEquals(2, last.items.size)
+        assertFalse(last.hasMore)
+    }
+
+    @Test
+    fun `browsePaged fails soft with no more pages`() = runTest {
+        val failing = AggSourceRepository(
+            client = AggCmsClient(fetcher = { throw IllegalStateException("down") }),
+        )
+        val page = failing.browsePaged("1", 2)
+        assertTrue(page.items.isEmpty())
+        assertFalse(page.hasMore)
+    }
+
+    @Test
+    fun `browse delegates to browsePaged items`() = runTest {
+        val client = AggCmsClient(fetcher = { listJson })
+        val repo = AggSourceRepository(client = client)
+        assertEquals(2, repo.browse("1", 1).size)
     }
 }
