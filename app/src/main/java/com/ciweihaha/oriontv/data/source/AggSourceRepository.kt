@@ -31,19 +31,32 @@ class AggSourceRepository(
 ) : SourceRepository {
 
     private var cachedCategories: List<VodCategory>? = null
+    /** R14-D: categories used to be cached forever per process — a
+     *  category added server-side never appeared until the app was
+     *  killed. 30 minutes, same shape as the live-channel cache in
+     *  TvBoxSourceRepository. */
+    private var categoriesCachedAtMs: Long = 0L
 
     override suspend fun channels(): List<Channel> =
         failSoft(emptyList()) { channelSource.channels() }
 
     override suspend fun categories(): List<VodCategory> {
-        cachedCategories?.let { return it }
+        val cached = cachedCategories
+        if (cached != null &&
+            System.currentTimeMillis() - categoriesCachedAtMs < CATEGORIES_TTL_MS
+        ) {
+            return cached
+        }
         val result = failSoft(emptyList()) {
             val first = client.videolist(1, 1)
             val list = mutableListOf(VodCategory("all", "全部"))
             first.classes.forEach { list += VodCategory(it.typeId.toString(), it.typeName) }
             list.toList()
         }
-        if (result.isNotEmpty()) cachedCategories = result
+        if (result.isNotEmpty()) {
+            cachedCategories = result
+            categoriesCachedAtMs = System.currentTimeMillis()
+        }
         return result
     }
 
@@ -127,4 +140,9 @@ class AggSourceRepository(
         year = year,
         remarks = remarks,
     )
+
+    companion object {
+        /** R14-D: categories cache TTL (see [categories]). */
+        private const val CATEGORIES_TTL_MS = 30 * 60 * 1000L
+    }
 }
