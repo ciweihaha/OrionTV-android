@@ -244,4 +244,33 @@ class AggCmsClientTest {
         val repo = AggSourceRepository(client = client)
         assertEquals(2, repo.browse("1", 1).size)
     }
+
+    @Test
+    fun `search hits the wd endpoint and maps items`() = runTest {
+        var seenUrl = ""
+        val client = AggCmsClient(fetcher = { url ->
+            seenUrl = url
+            listJson
+        })
+        val result = client.search("阿龙", 1)
+        assertTrue(seenUrl.contains("ac=videolist"))
+        assertTrue(seenUrl.contains("wd="))
+        assertTrue(seenUrl.contains("pg=1"))
+        assertFalse(seenUrl.contains("t="))
+        assertEquals(2, result.list.size)
+        assertEquals("src~111", result.list[0].vodId)
+    }
+
+    @Test
+    fun `repository search maps items and fails soft`() = runTest {
+        val client = AggCmsClient(fetcher = { listJson })
+        val repo = AggSourceRepository(client = client)
+        val items = repo.search("阿龙", 1)
+        assertEquals(2, items.size)
+        assertEquals("阿龙2025", items[0].title)
+        val failing = AggSourceRepository(
+            client = AggCmsClient(fetcher = { throw IllegalStateException("down") }),
+        )
+        assertTrue(failing.search("阿龙", 1).isEmpty())
+    }
 }
