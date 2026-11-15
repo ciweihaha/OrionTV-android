@@ -46,6 +46,10 @@ class LiveActivity : AppCompatActivity() {
     }
     private var channels: List<Channel> = emptyList()
     private var selected: Channel? = null
+    /** True when the list on screen is the placeholder set shown only
+     *  because the configured M3U failed to load (button copy must say
+     *  so instead of implying a real source is coming). */
+    private var m3uFailedFallback = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,18 +60,22 @@ class LiveActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val m3uUrl = settings.getM3uUrl()
             if (m3uUrl.isNullOrBlank()) {
+                m3uFailedFallback = false
                 showChannels(source.channels())
             } else {
                 val cached = m3uSource.getCached(m3uUrl)
                 if (cached.isNotEmpty()) {
+                    m3uFailedFallback = false
                     binding.sourceNote.visibility = View.GONE
                     showChannels(cached)
                 }
                 val fresh = m3uSource.refresh(m3uUrl)
                 if (fresh.isNotEmpty()) {
+                    m3uFailedFallback = false
                     binding.sourceNote.visibility = View.GONE
                     showChannels(fresh)
                 } else if (cached.isEmpty()) {
+                    m3uFailedFallback = true
                     binding.sourceNote.text = getString(R.string.m3u_load_failed)
                     binding.sourceNote.visibility = View.VISIBLE
                     showChannels(source.channels())
@@ -82,7 +90,9 @@ class LiveActivity : AppCompatActivity() {
             // the channel's alternate lines; hand them all to the player
             // so it can switch without leaving playback.
             val lines = LiveLines.linesFor(channels, channel)
-            val lineIndex = LiveLines.indexOf(lines, channel)
+            // indexOf returns -1 when the channel is not among its own
+            // lines; 0 (the first line) is the explicit fallback here.
+            val lineIndex = LiveLines.indexOf(lines, channel).takeIf { it >= 0 } ?: 0
             startActivity(
                 Intent(this, PlayerActivity::class.java)
                     .putExtra(PlayerActivity.EXTRA_URL, url)
@@ -101,12 +111,32 @@ class LiveActivity : AppCompatActivity() {
         binding.channelList.adapter = ChannelAdapter(list) { channel ->
             select(channel)
         }
+        // M8: only an id that actually exists in this list selects a
+        // channel. A stale / placeholder id falls through to the
+        // previously selected channel, then the first real one — the
+        // caller (HomeFragment) no longer passes placeholder ids at all.
         val initialId = intent.getStringExtra(EXTRA_CHANNEL_ID)
-        select(
-            list.find { it.id == initialId }
-                ?: list.find { it.id == selected?.id }
-                ?: list.firstOrNull(),
-        )
+        val target = list.find { it.id == initialId }
+            ?: list.find { it.id == selected?.id }
+            ?: list.firstOrNull()
+        select(target)
+        // Rebuilding the adapter drops focus: restore it to the selected
+        // row so a refresh does not leave the list unfocused.
+        val position = list.indexOf(target)
+        if (position >= 0) {
+            binding.channelList.post {
+                // D4: the target row may be off-screen after a refresh,
+                // and findViewHolderForAdapterPosition returns null for
+                // rows that were never laid out — focus was silently
+                // lost and DPAD input went nowhere. Scroll it into
+                // view first, then focus it on the next layout pass.
+                binding.channelList.scrollToPosition(position)
+                binding.channelList.post {
+                    binding.channelList
+                        .findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
+                }
+            }
+        }
     }
 
     private fun select(channel: Channel?) {
@@ -115,8 +145,13 @@ class LiveActivity : AppCompatActivity() {
         binding.detailName.text = channel.name
         binding.detailGroup.text = channel.group
         binding.playButton.isEnabled = channel.streamUrl != null
-        binding.playButton.text =
-            if (channel.streamUrl != null) "播放" else "待接入真实源（第二阶段）"
+        binding.playButton.text = when {
+            channel.streamUrl != null -> "播放"
+            // The old copy ("待接入真实源（第二阶段）") implied a real
+            // source was on its way; say what actually happened.
+            m3uFailedFallback -> "直播源加载失败，请检查 M3U 地址"
+            else -> "演示频道 · 暂无播放地址"
+        }
         lifecycleScope.launch {
             val (now, next) = epg.nowAndNext(channel.id)
             binding.nowTitle.text = now?.let { "正在播：${it.title}" } ?: "正在播：—"
