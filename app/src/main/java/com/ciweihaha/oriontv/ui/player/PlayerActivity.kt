@@ -56,6 +56,11 @@ class PlayerActivity : AppCompatActivity() {
     private var episodeTitle: String = ""
     /** Wall-clock of the last periodic progress save (throttle, 30s). */
     private var lastProgressSaveMs: Long = 0L
+    /** R13-B: true between onStart/onStop. A line-switch candidate that
+     *  becomes READY after HOME (stopped) must not swap in and keep
+     *  playing in the background — onStop already released the old
+     *  player, and onStart rebuilds from currentUrl (the old line). */
+    private var isStarted: Boolean = false
     private val seekPreview get() = _seekPreview
     private var _seekPreview: SeekPreviewController? = null
 
@@ -185,7 +190,9 @@ class PlayerActivity : AppCompatActivity() {
             if (!settled) {
                 settled = true
                 candidate.release()
-                if (!isDestroyed) {
+                // R13-B: HOME pressed mid-switch — the candidate is gone
+                // either way, but don't pop a toast over the home screen.
+                if (!isDestroyed && isStarted) {
                     Toast.makeText(
                         this@PlayerActivity,
                         "线路 ${index + 1} 切换超时，已保留当前线路",
@@ -199,6 +206,15 @@ class PlayerActivity : AppCompatActivity() {
                 if (state == Player.STATE_READY && !settled) {
                     settled = true
                     handler.removeCallbacks(timeoutRunnable)
+                    // R13-B: HOME pressed mid-switch — onStop already
+                    // released the old player; swapping the candidate
+                    // in now would play audio in the background and
+                    // onStart would skip its rebuild (player != null).
+                    // Drop the candidate; onStart rebuilds the old line.
+                    if (!isStarted) {
+                        candidate.release()
+                        return
+                    }
                     if (isDestroyed) {
                         candidate.release()
                         return
@@ -228,6 +244,9 @@ class PlayerActivity : AppCompatActivity() {
                 handler.removeCallbacks(timeoutRunnable)
                 candidate.release()
                 if (isDestroyed) return
+                // R13-B: same HOME-mid-switch guard as the READY path —
+                // no failure toast over the home screen.
+                if (!isStarted) return
                 // The old player is untouched and still attached, so
                 // playback continues on the previous line.
                 Log.e(TAG, "line switch failed", error)
@@ -430,12 +449,18 @@ class PlayerActivity : AppCompatActivity() {
         binding.playerTitle.visibility = View.GONE
     }
 
+    /**
+     * R13-A: durations over an hour used to render as bare minutes
+     * ("90:00" for a 1.5h film) — show H:MM:SS once past 60 minutes.
+     */
     private fun formatTime(ms: Long): String {
         if (ms < 0) return "--:--"
         val totalSeconds = ms / 1000
-        val minutes = totalSeconds / 60
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
         val seconds = totalSeconds % 60
-        return "%02d:%02d".format(minutes, seconds)
+        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
+        else "%02d:%02d".format(minutes, seconds)
     }
 
     /**
@@ -479,6 +504,7 @@ class PlayerActivity : AppCompatActivity() {
      */
     override fun onStart() {
         super.onStart()
+        isStarted = true
         if (player == null && currentUrl.isNotEmpty() && !isFinishing) {
             initPlayer(currentUrl, savedPositionMs, savedPlayWhenReady)
             handler.post(progressTicker)
@@ -488,6 +514,9 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        // R13-B: mark stopped FIRST — a line-switch candidate that
+        // becomes READY after this point must be dropped, not swapped in.
+        isStarted = false
         handler.removeCallbacks(progressTicker)
         handler.removeCallbacks(hideControlsRunnable)
         handler.removeCallbacks(autoCommitRunnable)
