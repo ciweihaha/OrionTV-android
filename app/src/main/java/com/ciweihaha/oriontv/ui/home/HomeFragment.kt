@@ -47,10 +47,19 @@ class HomeFragment : BrowseSupportFragment() {
 
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
             when (item) {
-                is Channel -> startActivity(
-                    Intent(requireContext(), LiveActivity::class.java)
-                        .putExtra(LiveActivity.EXTRA_CHANNEL_ID, item.id),
-                )
+                is Channel -> {
+                    val intent = Intent(requireContext(), LiveActivity::class.java)
+                    // M8: placeholder (demo) channels have no stream URL
+                    // and their ids never match a real M3U channel, so
+                    // passing the id would silently open the first
+                    // channel no matter which row was tapped. Only pass
+                    // the id for a real channel; a placeholder opens the
+                    // live list, which starts at its first real channel.
+                    if (!item.streamUrl.isNullOrBlank()) {
+                        intent.putExtra(LiveActivity.EXTRA_CHANNEL_ID, item.id)
+                    }
+                    startActivity(intent)
+                }
                 is VodCategory -> startActivity(
                     Intent(requireContext(), VodBrowseActivity::class.java)
                         .putExtra(VodBrowseActivity.EXTRA_CATEGORY_ID, item.id),
