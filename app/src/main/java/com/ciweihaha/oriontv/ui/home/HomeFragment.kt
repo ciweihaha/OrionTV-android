@@ -3,7 +3,9 @@ package com.ciweihaha.oriontv.ui.home
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.leanback.app.BrowseSupportFragment
 import androidx.leanback.widget.ArrayObjectAdapter
 import androidx.leanback.widget.HeaderItem
@@ -210,6 +212,7 @@ class HomeFragment : BrowseSupportFragment() {
     private fun checkForUpdate() {
         viewLifecycleOwner.lifecycleScope.launch {
             val result = UpdateChecker().check()
+            val updateAvailable = result.getOrNull()?.updateAvailable == true
             val message = result.fold(
                 onSuccess = { r ->
                     if (r.updateAvailable) {
@@ -220,16 +223,42 @@ class HomeFragment : BrowseSupportFragment() {
                 },
                 onFailure = { e -> "检查失败：${e.message}" },
             )
-            AlertDialog.Builder(requireContext())
+            val dialog = AlertDialog.Builder(requireContext())
                 .setTitle("检查更新")
                 .setMessage(message)
                 .setPositiveButton("确定", null)
-                .show()
+            // R14-B: "发现新版本" used to be a dead end — the dialog
+            // had no way to get the new version at all. Offer the
+            // releases page; a TV without a browser just gets the
+            // address as a toast instead of a crash.
+            if (updateAvailable) {
+                dialog.setNeutralButton("去下载") { _, _ -> openReleasesPage() }
+            }
+            dialog.show()
+        }
+    }
+
+    private fun openReleasesPage() {
+        val context = context ?: return
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse(RELEASES_URL),
+        )
+        if (intent.resolveActivity(context.packageManager) != null) {
+            startActivity(intent)
+        } else {
+            Toast.makeText(
+                context,
+                "电视上没有浏览器，请在手机上打开：$RELEASES_URL",
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
     companion object {
         /** "继续观看" row shows at most this many breakpoints. */
         private const val MAX_CONTINUE_ITEMS = 10
+        /** R14-B: where the "去下载" button in the update dialog goes. */
+        const val RELEASES_URL = "https://github.com/ciweihaha/OrionTV-android/releases/latest"
     }
 }
