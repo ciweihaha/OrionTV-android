@@ -15,7 +15,9 @@ import com.ciweihaha.oriontv.data.AppSources
 import com.ciweihaha.oriontv.data.model.FavoriteItem
 import com.ciweihaha.oriontv.databinding.ActivityFavoritesBinding
 import com.ciweihaha.oriontv.ui.common.PosterArt
+import com.ciweihaha.oriontv.ui.common.PosterLoader
 import com.ciweihaha.oriontv.ui.vod.VodDetailActivity
+import kotlinx.coroutines.CoroutineScope
 
 /** All favourited titles, newest first. Tapping one opens its detail page. */
 class FavoritesActivity : AppCompatActivity() {
@@ -32,7 +34,7 @@ class FavoritesActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         val items = AppSources.library(this).favorites()
-        binding.favoriteGrid.adapter = FavoriteAdapter(items) { item ->
+        binding.favoriteGrid.adapter = FavoriteAdapter(lifecycleScope, items) { item ->
             startActivity(
                 Intent(this, VodDetailActivity::class.java)
                     .putExtra(VodDetailActivity.EXTRA_VOD_ID, item.vodId),
@@ -42,6 +44,7 @@ class FavoritesActivity : AppCompatActivity() {
     }
 
     private class FavoriteAdapter(
+        private val scope: CoroutineScope,
         private val items: List<FavoriteItem>,
         private val onClick: (FavoriteItem) -> Unit,
     ) : RecyclerView.Adapter<FavoriteAdapter.Holder>() {
@@ -61,11 +64,19 @@ class FavoritesActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val item = items[position]
             val density = holder.itemView.resources.displayMetrics.density
+            // R13-I: favourites used to show only the generated gradient
+            // block even though the item carries a poster URL. Same
+            // pattern as the browse screen (real poster, placeholder
+            // stays as the fallback).
             holder.poster.setImageDrawable(
                 PosterArt.make(
                     holder.itemView.context, item.title,
                     (160 * density).toInt(), (240 * density).toInt(),
                 ),
+            )
+            PosterLoader.load(
+                holder.poster, item.posterUrl,
+                (160 * density).toInt(), (240 * density).toInt(), scope,
             )
             holder.title.text = item.title
             holder.meta.text = listOfNotNull(item.year, item.remarks).joinToString(" · ")
