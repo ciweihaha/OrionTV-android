@@ -50,5 +50,11 @@ data class VodDetail(
     val episodes: List<Episode>,
 )
 
+/** One page of a VOD browse/search result. `hasMore` is false on the last page. */
+data class VodPage(
+    val items: List<VodItem>,
+    val hasMore: Boolean,
+)
+
 /** Home-row action cards (player test stream, update check). */
 data class HomeAction(val id: String, val title: String, val subtitle: String)
