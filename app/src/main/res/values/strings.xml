@@ -12,6 +12,8 @@
     <string name="settings_title">设置</string>
     <string name="m3u_url_label">直播源（M3U 地址）</string>
     <string name="m3u_url_hint">https://example.com/list.m3u</string>
+    <string name="skip_intro_label">跳过片头（秒，0 表示不跳过）</string>
+    <string name="skip_intro_seconds_hint">默认 90</string>
     <string name="save">保存</string>
     <string name="clear">清除</string>
     <string name="m3u_invalid">地址无效，请输入 http(s) 开头的 M3U 地址</string>
