@@ -6,16 +6,20 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ciweihaha.oriontv.R
 import com.ciweihaha.oriontv.data.model.Episode
+import com.ciweihaha.oriontv.data.model.VodDetail
 import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivityVodDetailBinding
 import com.ciweihaha.oriontv.ui.common.PosterArt
+import com.ciweihaha.oriontv.ui.common.PosterLoader
 import com.ciweihaha.oriontv.ui.player.PlayerActivity
 import kotlinx.coroutines.launch
 
@@ -28,36 +32,89 @@ class VodDetailActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityVodDetailBinding
     private val source = AggSourceRepository()
+    private var selectedSource: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityVodDetailBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.episodeGrid.layoutManager = GridLayoutManager(this, 6)
+        binding.sourceList.layoutManager =
+            LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
 
-        val vodId = intent.getStringExtra(EXTRA_VOD_ID) ?: return
+        val vodId = intent.getStringExtra(EXTRA_VOD_ID)
+        if (vodId.isNullOrBlank()) {
+            showDetailError("缺少节目信息，无法打开详情")
+            return
+        }
         lifecycleScope.launch {
-            val detail = source.detail(vodId) ?: return@launch
+            val detail = source.detail(vodId)
+            if (detail == null) {
+                // Was a silent blank screen: say so, and keep the screen
+                // usable (back) instead of showing an empty hero.
+                showDetailError("详情加载失败，请检查网络后重试")
+                return@launch
+            }
             val density = resources.displayMetrics.density
+            val widthPx = (240 * density).toInt()
+            val heightPx = (360 * density).toInt()
             binding.detailPoster.setImageDrawable(
-                PosterArt.make(
-                    this@VodDetailActivity, detail.item.title,
-                    (240 * density).toInt(), (360 * density).toInt(),
-                ),
+                PosterArt.make(this@VodDetailActivity, detail.item.title, widthPx, heightPx),
+            )
+            PosterLoader.load(
+                binding.detailPoster, detail.item.posterUrl,
+                widthPx, heightPx, lifecycleScope,
             )
             binding.detailTitle.text = detail.item.title
             binding.detailMeta.text =
                 listOfNotNull(detail.item.year, detail.item.remarks).joinToString(" · ")
             binding.detailDescription.text = detail.description
-            binding.episodeGrid.adapter = EpisodeAdapter(detail.episodes) { episode ->
-                playEpisode(detail.item.title, episode)
+            setupSources(detail)
+        }
+    }
+
+    /** Detail-load failure: visible error text + toast, play disabled. */
+    private fun showDetailError(message: String) {
+        binding.detailError.text = message
+        binding.detailError.visibility = View.VISIBLE
+        binding.playButton.isEnabled = false
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    /**
+     * M12: episodes carry their source group; with more than one source
+     * a chip row lets the user switch which source's episodes (and
+     * play button) are shown. One source (or none) needs no row.
+     */
+    private fun setupSources(detail: VodDetail) {
+        val sources = detail.episodes.mapNotNull { it.source }.distinct()
+        selectedSource = sources.firstOrNull()
+        if (sources.size > 1) {
+            binding.sourceList.visibility = View.VISIBLE
+            binding.sourceList.adapter = SourceAdapter(sources, selectedSource) { chosen ->
+                selectedSource = chosen
+                (binding.sourceList.adapter as SourceAdapter).selected = chosen
+                binding.sourceList.adapter?.notifyDataSetChanged()
+                showEpisodes(detail)
             }
-            val firstPlayable = detail.episodes.firstOrNull { !it.url.isNullOrBlank() }
-            binding.playButton.isEnabled = firstPlayable != null
-            binding.playButton.text = if (firstPlayable != null) "播放" else "暂无可播放剧集"
-            binding.playButton.setOnClickListener {
-                firstPlayable?.let { playEpisode(detail.item.title, it) }
-            }
+        } else {
+            binding.sourceList.visibility = View.GONE
+        }
+        showEpisodes(detail)
+    }
+
+    private fun showEpisodes(detail: VodDetail) {
+        val episodes = detail.episodes.filter {
+            selectedSource == null || it.source == selectedSource
+        }
+        binding.episodeGrid.adapter = EpisodeAdapter(episodes) { episode ->
+            playEpisode(detail.item.title, episode)
+        }
+        val firstPlayable = episodes.firstOrNull { !it.url.isNullOrBlank() }
+        binding.playButton.isEnabled = firstPlayable != null
+        binding.playButton.text = if (firstPlayable != null) "播放" else "暂无可播放剧集"
+        binding.playButton.setOnClickListener {
+            firstPlayable?.let { playEpisode(detail.item.title, it) }
         }
     }
 
@@ -72,6 +129,34 @@ class VodDetailActivity : AppCompatActivity() {
                 .putExtra(PlayerActivity.EXTRA_URL, url)
                 .putExtra(PlayerActivity.EXTRA_TITLE, "$title · ${episode.title}"),
         )
+    }
+
+    private class SourceAdapter(
+        private val items: List<String>,
+        var selected: String?,
+        private val onSelect: (String) -> Unit,
+    ) : RecyclerView.Adapter<SourceAdapter.Holder>() {
+
+        class Holder(view: View) : RecyclerView.ViewHolder(view) {
+            val text: TextView = view.findViewById(R.id.chip_text)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_chip, parent, false)
+            return Holder(view)
+        }
+
+        override fun onBindViewHolder(holder: Holder, position: Int) {
+            val name = items[position]
+            holder.text.text = name
+            holder.itemView.isSelected = name == selected
+            holder.itemView.isFocusable = true
+            holder.itemView.isFocusableInTouchMode = true
+            holder.itemView.setOnClickListener { onSelect(name) }
+        }
+
+        override fun getItemCount(): Int = items.size
     }
 
     private class EpisodeAdapter(

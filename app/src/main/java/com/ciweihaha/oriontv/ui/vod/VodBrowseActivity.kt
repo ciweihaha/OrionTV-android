@@ -18,6 +18,10 @@ import com.ciweihaha.oriontv.data.model.VodItem
 import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivityVodBrowseBinding
 import com.ciweihaha.oriontv.ui.common.PosterArt
+import com.ciweihaha.oriontv.ui.common.PosterLoader
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -40,6 +44,11 @@ class VodBrowseActivity : AppCompatActivity() {
     private lateinit var posterAdapter: PosterAdapter
     private lateinit var gridLayoutManager: GridLayoutManager
     private val paging = PagingState()
+    /** In-flight page load (S2) + its generation: a category switch
+     *  cancels the old load, and a late result from a previous
+     *  generation is discarded instead of appending into the new list. */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +59,7 @@ class VodBrowseActivity : AppCompatActivity() {
             LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         gridLayoutManager = GridLayoutManager(this, 6)
         binding.posterGrid.layoutManager = gridLayoutManager
-        posterAdapter = PosterAdapter { item ->
+        posterAdapter = PosterAdapter(lifecycleScope) { item ->
             startActivity(
                 Intent(this@VodBrowseActivity, VodDetailActivity::class.java)
                     .putExtra(VodDetailActivity.EXTRA_VOD_ID, item.id),
@@ -73,6 +82,8 @@ class VodBrowseActivity : AppCompatActivity() {
                 selectedCategory = category.id
                 categoryAdapter.selectedId = category.id
                 categoryAdapter.notifyDataSetChanged()
+                loadJob?.cancel()
+                loadGeneration++
                 paging.reset()
                 posterAdapter.setItems(emptyList())
                 binding.emptyHint.visibility = View.GONE
@@ -83,34 +94,69 @@ class VodBrowseActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * S2/M10/M11: one load at a time (previous job cancelled, stale
+     * generations discarded). An empty page advances past itself and the
+     * next page is tried while the server still reports more pages
+     * (M11: page 1 empty with pagecount > 1 is not a dead end); two
+     * empty pages in a row end pagination instead of retrying forever
+     * (M10). A real failure keeps the previous state for scroll retry.
+     */
     private fun loadPage(page: Int) {
         if (!paging.canLoadMore()) return
+        loadJob?.cancel()
         paging.onLoadStarted()
         updateLoadingMore()
-        lifecycleScope.launch {
-            val result = source.browsePaged(selectedCategory, page)
-            if (result.items.isEmpty() && page > 1) {
-                // An empty follow-up page is a failed load, not the end of
-                // the list: keep the previous page/hasMore so scrolling can
-                // retry it instead of stopping pagination for good.
-                paging.onLoadFailed()
-            } else {
-                paging.onPageLoaded(page, result.hasMore)
-                if (page == 1) {
-                    posterAdapter.setItems(result.items)
-                } else {
-                    posterAdapter.appendItems(result.items)
+        val category = selectedCategory
+        val generation = ++loadGeneration
+        loadJob = lifecycleScope.launch {
+            try {
+                var pageToLoad = page
+                while (true) {
+                    val result = source.browsePaged(category, pageToLoad)
+                    if (generation != loadGeneration) return@launch
+                    if (result.items.isEmpty()) {
+                        paging.onEmptyPage(pageToLoad)
+                        if (result.hasMore && paging.canLoadMore()) {
+                            pageToLoad = paging.nextPage
+                            paging.onLoadStarted()
+                            continue
+                        }
+                        if (posterAdapter.itemCount == 0) {
+                            binding.emptyHint.visibility = View.VISIBLE
+                        }
+                        break
+                    }
+                    paging.onPageLoaded(pageToLoad, result.hasMore)
+                    if (pageToLoad == 1) {
+                        posterAdapter.setItems(result.items)
+                    } else {
+                        posterAdapter.appendItems(result.items)
+                    }
+                    binding.emptyHint.visibility =
+                        if (posterAdapter.itemCount == 0) View.VISIBLE else View.GONE
+                    break
                 }
-                binding.emptyHint.visibility =
-                    if (posterAdapter.itemCount == 0) View.VISIBLE else View.GONE
+            } catch (e: CancellationException) {
+                // Cancelled (category switch / activity destroyed): never
+                // report it as a failed load and never retry afterwards.
+                throw e
+            } catch (e: Exception) {
+                if (generation != loadGeneration) return@launch
+                paging.onLoadFailed()
+            } finally {
+                updateLoadingMore()
             }
-            updateLoadingMore()
         }
     }
 
     private fun updateLoadingMore() {
         binding.loadingMore.visibility =
             if (paging.isLoading && paging.currentPage > 0) View.VISIBLE else View.GONE
+        // First page had no loading state at all: show one while page 1
+        // (or its empty-page chain) is still loading.
+        binding.loadingFirst.visibility =
+            if (paging.isLoading && paging.currentPage == 0) View.VISIBLE else View.GONE
     }
 
     private class CategoryAdapter(
@@ -142,6 +188,7 @@ class VodBrowseActivity : AppCompatActivity() {
     }
 
     private class PosterAdapter(
+        private val scope: CoroutineScope,
         private val onClick: (VodItem) -> Unit,
     ) : RecyclerView.Adapter<PosterAdapter.Holder>() {
 
@@ -175,12 +222,14 @@ class VodBrowseActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val item = items[position]
             val density = holder.itemView.resources.displayMetrics.density
+            val widthPx = (160 * density).toInt()
+            val heightPx = (240 * density).toInt()
+            // Real poster when the CMS gave one (cached, async); the
+            // gradient block stays as the placeholder / fallback.
             holder.poster.setImageDrawable(
-                PosterArt.make(
-                    holder.itemView.context, item.title,
-                    (160 * density).toInt(), (240 * density).toInt(),
-                ),
+                PosterArt.make(holder.itemView.context, item.title, widthPx, heightPx),
             )
+            PosterLoader.load(holder.poster, item.posterUrl, widthPx, heightPx, scope)
             holder.title.text = item.title
             holder.meta.text = listOfNotNull(item.year, item.remarks).joinToString(" · ")
             holder.itemView.isFocusable = true

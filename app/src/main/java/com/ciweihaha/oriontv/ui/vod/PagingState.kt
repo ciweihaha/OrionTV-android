@@ -29,6 +29,10 @@ class PagingState {
     var isLoading: Boolean = false
         private set
 
+    /** Consecutive pages that came back empty (M10/M11). */
+    var consecutiveEmptyPages: Int = 0
+        private set
+
     /** Next page to request (1-based). */
     val nextPage: Int get() = currentPage + 1
 
@@ -36,6 +40,7 @@ class PagingState {
         currentPage = 0
         hasMore = true
         isLoading = false
+        consecutiveEmptyPages = 0
     }
 
     fun canLoadMore(): Boolean = !isLoading && hasMore
@@ -48,6 +53,24 @@ class PagingState {
         isLoading = false
         currentPage = page
         hasMore = pageHasMore
+        consecutiveEmptyPages = 0
+    }
+
+    /**
+     * M10: an empty page is not automatically "the end", but it is not
+     * infinitely retryable either. The first consecutive empty page
+     * keeps `hasMore` so the next page can be tried; the second one in
+     * a row ends pagination ([hasMore] = false) instead of retrying
+     * the same empty page forever. The page cursor advances past the
+     * empty page so the next load requests the following page.
+     */
+    fun onEmptyPage(page: Int) {
+        isLoading = false
+        currentPage = page
+        consecutiveEmptyPages++
+        if (consecutiveEmptyPages >= MAX_CONSECUTIVE_EMPTY_PAGES) {
+            hasMore = false
+        }
     }
 
     fun onLoadFailed() {
@@ -72,5 +95,7 @@ class PagingState {
     companion object {
         /** Start loading the next page this many items before the end. */
         const val LOAD_MORE_THRESHOLD = 6
+        /** Empty pages in a row after which pagination stops (M10). */
+        const val MAX_CONSECUTIVE_EMPTY_PAGES = 2
     }
 }
