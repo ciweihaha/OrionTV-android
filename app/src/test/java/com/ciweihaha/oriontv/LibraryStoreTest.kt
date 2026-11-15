@@ -60,4 +60,20 @@ class LibraryStoreTest {
         // Live / unknown duration: no resume.
         assertEquals(0L, mid.copy(durationMs = 0L).resumePositionMs())
     }
+
+    @Test
+    fun learnedIntros_roundTrip() {
+        val map = mapOf("abc~1" to 120_000L, "xyz~2" to 45_000L)
+        assertEquals(map, LibraryStore.decodeLearnedIntros(LibraryStore.encodeLearnedIntros(map)))
+    }
+
+    @Test
+    fun learnedIntros_invalidJson_returnsEmpty() {
+        assertTrue(LibraryStore.decodeLearnedIntros(null).isEmpty())
+        assertTrue(LibraryStore.decodeLearnedIntros("").isEmpty())
+        assertTrue(LibraryStore.decodeLearnedIntros("garbage").isEmpty())
+        // 非正数落点丢弃
+        assertTrue(LibraryStore.decodeLearnedIntros("{\"a\":0,\"b\":-5}").isEmpty())
+        assertEquals(mapOf("a" to 90_000L), LibraryStore.decodeLearnedIntros("{\"a\":90000,\"b\":0}"))
+    }
 }
