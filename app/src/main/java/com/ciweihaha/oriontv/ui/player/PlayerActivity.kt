@@ -61,6 +61,14 @@ class PlayerActivity : AppCompatActivity() {
      *  playing in the background — onStop already released the old
      *  player, and onStart rebuilds from currentUrl (the old line). */
     private var isStarted: Boolean = false
+    /** R14-A: transient-error retries used so far for the current item
+     *  (reset on READY); a pending retry runnable, if any. */
+    private var ioErrorRetries = 0
+    private var pendingRetryRunnable: Runnable? = null
+    /** R14-A: true after an automatic line switch caused by an error —
+     *  the new line failing too must end in an error toast, not a
+     *  ping-pong between two dead lines. Reset on READY. */
+    private var autoSwitchedOnError = false
     private val seekPreview get() = _seekPreview
     private var _seekPreview: SeekPreviewController? = null
 
@@ -131,19 +139,17 @@ class PlayerActivity : AppCompatActivity() {
     private fun initPlayer(url: String, startPositionMs: Long = 0L, playWhenReady: Boolean = true) {
         val exo = ExoPlayer.Builder(this).build()
         player = exo
+        // R14-A: a fresh player is a fresh error budget — a counter
+        // exhausted by the previous item (or a rebuild after HOME)
+        // must not block retries on this one.
+        ioErrorRetries = 0
+        autoSwitchedOnError = false
         binding.playerView.player = exo
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                // D2: the raw message is often a wall of text (full URL,
-                // nested causes) that a Toast cuts off mid-sentence.
-                // Show a short mapped copy; the full detail stays in
-                // Logcat where it can actually be read.
-                Log.e(TAG, "playback error", error)
-                Toast.makeText(
-                    this@PlayerActivity,
-                    shortPlaybackError(error),
-                    Toast.LENGTH_LONG,
-                ).show()
+                // R14-A: the retry policy lives in handlePlayerError —
+                // a transient blip used to kill playback outright.
+                handlePlayerError(exo, error)
             }
         })
         exo.setMediaItem(MediaItem.fromUri(url))
@@ -153,6 +159,9 @@ class PlayerActivity : AppCompatActivity() {
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
+                    // R14-A: playing again — the error counters reset.
+                    ioErrorRetries = 0
+                    autoSwitchedOnError = false
                     // D3: no seek preview for live streams (see
                     // [isLiveStream]): their duration is TIME_UNSET, so
                     // a preview built here could only ever target 0.
@@ -179,10 +188,18 @@ class PlayerActivity : AppCompatActivity() {
      * is released and the old line keeps playing — the previous code
      * released the old player first, so a failed switch lost playback.
      */
-    private fun switchToLine(index: Int) {
+    private fun switchToLine(index: Int, fromError: Boolean = false) {
         if (lineUrls.size <= 1 || index !in lineUrls.indices) return
         if (index == lineIndex) return
         resetSeekPreview()
+        // R14-A: a manual switch supersedes any pending error retry;
+        // an error-driven switch marks the episode so the new line
+        // failing too ends in a toast, not a ping-pong.
+        cancelPendingRetry()
+        if (fromError) autoSwitchedOnError = true else autoSwitchedOnError = false
+        // R14-A: the new line gets its own retry budget — the old
+        // line's exhausted counter must not block retries on this one.
+        ioErrorRetries = 0
         val oldPlayer = player
         val candidate = ExoPlayer.Builder(this).build()
         var settled = false
@@ -203,39 +220,45 @@ class PlayerActivity : AppCompatActivity() {
         }
         candidate.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY && !settled) {
-                    settled = true
-                    handler.removeCallbacks(timeoutRunnable)
-                    // R13-B: HOME pressed mid-switch — onStop already
-                    // released the old player; swapping the candidate
-                    // in now would play audio in the background and
-                    // onStart would skip its rebuild (player != null).
-                    // Drop the candidate; onStart rebuilds the old line.
-                    if (!isStarted) {
-                        candidate.release()
-                        return
-                    }
-                    if (isDestroyed) {
-                        candidate.release()
-                        return
-                    }
-                    oldPlayer?.release()
-                    player = candidate
-                    binding.playerView.player = candidate
-                    lineIndex = index
-                    currentUrl = lineUrls[index]
-                    savedPositionMs = 0L
-                    // D3: same live guard as initPlayer — a live line
-                    // has no seekable duration.
-                    _seekPreview = if (isLiveStream(candidate)) {
-                        null
-                    } else {
-                        SeekPreviewController(candidate.duration.coerceAtLeast(0L))
-                    }
-                    updateTitleAndLineButton()
-                    Toast.makeText(this@PlayerActivity, "已切换到线路 ${index + 1}", Toast.LENGTH_SHORT).show()
-                    showControls()
+                if (state != Player.STATE_READY) return
+                // R14-A: playing again — error counters reset on EVERY
+                // READY, not just the first: a line that recovers from
+                // a retry gets a fresh budget for the next error
+                // episode. (The swap below still runs only once.)
+                ioErrorRetries = 0
+                autoSwitchedOnError = false
+                if (settled) return
+                settled = true
+                handler.removeCallbacks(timeoutRunnable)
+                // R13-B: HOME pressed mid-switch — onStop already
+                // released the old player; swapping the candidate
+                // in now would play audio in the background and
+                // onStart would skip its rebuild (player != null).
+                // Drop the candidate; onStart rebuilds the old line.
+                if (!isStarted) {
+                    candidate.release()
+                    return
                 }
+                if (isDestroyed) {
+                    candidate.release()
+                    return
+                }
+                oldPlayer?.release()
+                player = candidate
+                binding.playerView.player = candidate
+                lineIndex = index
+                currentUrl = lineUrls[index]
+                savedPositionMs = 0L
+                // D3: same live guard as initPlayer — a live line
+                // has no seekable duration.
+                _seekPreview = if (isLiveStream(candidate)) {
+                    null
+                } else {
+                    SeekPreviewController(candidate.duration.coerceAtLeast(0L))
+                }
+                updateTitleAndLineButton()
+                Toast.makeText(this@PlayerActivity, "已切换到线路 ${index + 1}", Toast.LENGTH_SHORT).show()
+                showControls()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -256,6 +279,16 @@ class PlayerActivity : AppCompatActivity() {
                     Toast.LENGTH_LONG,
                 ).show()
                 showControls()
+            }
+        })
+        // R14-A: the candidate gets the retry-aware error listener too —
+        // without it, the swapped-in player had no error handling at
+        // all after the switch. The `exo !== player` guard inside
+        // handlePlayerError keeps switch-phase errors with the listener
+        // above (player still points at the old player until READY).
+        candidate.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                handlePlayerError(candidate, error)
             }
         })
         candidate.setMediaItem(MediaItem.fromUri(lineUrls[index]))
@@ -472,6 +505,78 @@ class PlayerActivity : AppCompatActivity() {
         exo.isCurrentMediaItemLive || exo.duration == C.TIME_UNSET
 
     /**
+     * R14-A: a transient network error (2004/2001/2002) used to kill
+     * playback outright — one upstream blip and the screen was dead
+     * until the user left and came back. Retry the same item up to
+     * [MAX_IO_ERROR_RETRIES] times with growing backoff (1s/2s/3s/5s/8s);
+     * when the retries are exhausted, fall through to the next line if
+     * there is one, and only then show the failure toast. Non-transient
+     * errors (decode / parse / DRM) go straight to the toast.
+     *
+     * A second hole this closes: after a line switch the swapped-in
+     * player had NO error listener at all — the switch-phase listener
+     * returns early once settled, so later errors were swallowed
+     * silently. The candidate gets this listener too (see
+     * [switchToLine]); the `exo !== player` guard keeps switch-phase
+     * errors with the switch listener, which owns them.
+     */
+    private fun handlePlayerError(exo: ExoPlayer, error: PlaybackException) {
+        if (exo !== player) return
+        // D2: the raw message is often a wall of text (full URL,
+        // nested causes) that a Toast cuts off mid-sentence.
+        // Show a short mapped copy; the full detail stays in
+        // Logcat where it can actually be read.
+        Log.e(TAG, "playback error", error)
+        if (shouldRetryIoError(error.errorCode, ioErrorRetries)) {
+            ioErrorRetries++
+            cancelPendingRetry()
+            Toast.makeText(
+                this,
+                "网络波动，正在重试（$ioErrorRetries/$MAX_IO_ERROR_RETRIES）…",
+                Toast.LENGTH_SHORT,
+            ).show()
+            val target = exo
+            val runnable = Runnable { retryPlayback(target) }
+            pendingRetryRunnable = runnable
+            handler.postDelayed(runnable, retryDelayMs(ioErrorRetries))
+            return
+        }
+        ioErrorRetries = 0
+        // Retries exhausted (or a non-transient error): try the next
+        // line automatically instead of leaving a dead screen — but
+        // only once per error episode, so two dead lines cannot
+        // ping-pong forever.
+        if (lineUrls.size > 1 && !autoSwitchedOnError) {
+            val next = LiveLines.nextIndex(lineIndex, lineUrls.size)
+            if (next != lineIndex) {
+                Toast.makeText(this, "当前线路异常，正在切换线路…", Toast.LENGTH_SHORT).show()
+                switchToLine(next, fromError = true)
+                return
+            }
+        }
+        Toast.makeText(
+            this@PlayerActivity,
+            shortPlaybackError(error),
+            Toast.LENGTH_LONG,
+        ).show()
+    }
+
+    /** Re-prepare the errored item: live resumes at the live edge,
+     *  VOD resumes where it stopped. Never runs after stop/release. */
+    private fun retryPlayback(exo: ExoPlayer) {
+        pendingRetryRunnable = null
+        if (exo !== player || isDestroyed || !isStarted) return
+        if (isLiveStream(exo)) exo.seekToDefaultPosition()
+        else exo.seekTo(exo.currentPosition.coerceAtLeast(0L))
+        exo.prepare()
+    }
+
+    private fun cancelPendingRetry() {
+        pendingRetryRunnable?.let { handler.removeCallbacks(it) }
+        pendingRetryRunnable = null
+    }
+
+    /**
      * D2: one short, readable line per failure kind. The raw
      * [PlaybackException.message] (URL + cause chain) is logged, not
      * shown — a Toast cuts it off mid-sentence.
@@ -520,6 +625,9 @@ class PlayerActivity : AppCompatActivity() {
         handler.removeCallbacks(progressTicker)
         handler.removeCallbacks(hideControlsRunnable)
         handler.removeCallbacks(autoCommitRunnable)
+        // R14-A: a retry scheduled while stopping must never fire
+        // against the released player.
+        cancelPendingRetry()
         savedPositionMs = player?.currentPosition ?: savedPositionMs
         savedPlayWhenReady = player?.playWhenReady ?: savedPlayWhenReady
         resetSeekPreview()
@@ -549,5 +657,31 @@ class PlayerActivity : AppCompatActivity() {
         private const val PROGRESS_SAVE_INTERVAL_MS = 30_000L
         /** Give up on a candidate line after this long; old line survives. */
         private const val LINE_SWITCH_TIMEOUT_MS = 10_000L
+        /** R14-A: transient-error retries (same error set as the mytv
+         *  fork: 2004/2001/2002). The window is wider than the fork's
+         *  3 tries / ~6s — the sibling tgyy app showed a rotation
+         *  glitch longer than ~6s burns all 3 retries, so this is 5
+         *  tries over ~19s. */
+        const val MAX_IO_ERROR_RETRIES = 5
+        /** Error codes worth retrying with backoff. */
+        val TRANSIENT_IO_ERROR_CODES: Set<Int> = setOf(
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        )
+
+        /** R14-A: pure retry policy (unit-tested) — retry a transient
+         *  IO error while under the cap; anything else fails at once. */
+        fun shouldRetryIoError(errorCode: Int, retriesSoFar: Int): Boolean =
+            retriesSoFar < MAX_IO_ERROR_RETRIES && errorCode in TRANSIENT_IO_ERROR_CODES
+
+        /** R14-A: backoff for retry [attempt] (1-based): 1s/2s/3s/5s/8s. */
+        fun retryDelayMs(attempt: Int): Long = when (attempt) {
+            1 -> 1_000L
+            2 -> 2_000L
+            3 -> 3_000L
+            4 -> 5_000L
+            else -> 8_000L
+        }
     }
 }
