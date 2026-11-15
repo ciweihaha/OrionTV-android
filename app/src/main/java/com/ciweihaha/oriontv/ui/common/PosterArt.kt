@@ -8,16 +8,36 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
+import android.util.LruCache
 import kotlin.math.abs
 
 /**
  * Deterministic gradient poster from a title (same title → same colours).
  * Used wherever a real poster is unavailable; matches the approved mockup's
  * "no-poster → gradient block" rule. Pure drawing, no network.
+ *
+ * The bitmap used to be rebuilt on every bind; identical
+ * (title, size) requests now share one cached drawable.
  */
 object PosterArt {
 
+    /** ~4MB of gradient placeholders. */
+    private const val MAX_CACHE_BYTES = 4 * 1024 * 1024
+
+    private val cache = object : LruCache<String, BitmapDrawable>(MAX_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: BitmapDrawable): Int =
+            value.bitmap?.byteCount ?: 0
+    }
+
     fun make(context: Context, title: String, widthPx: Int, heightPx: Int): BitmapDrawable {
+        val key = "$title|$widthPx|$heightPx"
+        cache.get(key)?.let { return it }
+        val drawable = draw(context, title, widthPx, heightPx)
+        cache.put(key, drawable)
+        return drawable
+    }
+
+    private fun draw(context: Context, title: String, widthPx: Int, heightPx: Int): BitmapDrawable {
         val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val (top, bottom) = colorsFor(title)
