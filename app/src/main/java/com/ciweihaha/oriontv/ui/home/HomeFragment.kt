@@ -19,8 +19,10 @@ import com.ciweihaha.oriontv.data.model.VodCategory
 import com.ciweihaha.oriontv.data.placeholder.PlaceholderData
 import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.data.update.UpdateChecker
+import com.ciweihaha.oriontv.ui.favorites.FavoritesActivity
 import com.ciweihaha.oriontv.ui.live.LiveActivity
 import com.ciweihaha.oriontv.ui.player.PlayerActivity
+import com.ciweihaha.oriontv.ui.search.SearchActivity
 import com.ciweihaha.oriontv.ui.settings.SettingsActivity
 import com.ciweihaha.oriontv.ui.vod.VodBrowseActivity
 import kotlinx.coroutines.launch
@@ -76,6 +78,13 @@ class HomeFragment : BrowseSupportFragment() {
                         Intent(requireContext(), SettingsActivity::class.java),
                     )
                     "check_update" -> checkForUpdate()
+                    // Round 1: search + favorites entry points.
+                    "search" -> startActivity(
+                        Intent(requireContext(), SearchActivity::class.java),
+                    )
+                    "favorites" -> startActivity(
+                        Intent(requireContext(), FavoritesActivity::class.java),
+                    )
                 }
             }
         }
@@ -102,6 +111,8 @@ class HomeFragment : BrowseSupportFragment() {
             rowsAdapter.add(ListRow(HeaderItem(2, "点播"), vodAdapter))
 
             val appAdapter = ArrayObjectAdapter(PosterCardPresenter())
+            appAdapter.add(HomeAction("search", "搜索", "按片名搜索点播"))
+            appAdapter.add(HomeAction("favorites", "我的收藏", "收藏的影片"))
             appAdapter.add(HomeAction("test_stream", "播放器测试", "BipBop 测试流 · 验证 Media3"))
             appAdapter.add(HomeAction("m3u_settings", "直播源设置", "配置 M3U 直播地址"))
             appAdapter.add(HomeAction("check_update", "检查更新", "走 okys-agg 版本接口"))
