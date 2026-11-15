@@ -16,6 +16,8 @@ import com.ciweihaha.oriontv.data.model.Channel
  *   quotes (attribute values and names may themselves contain commas,
  *   e.g. `group-title="A,B"` or `CCTV-1,高清`).
  * - `tvg-logo` / `group-title` attributes are read case-insensitively.
+ * - `tvg-id` is read the same way (round 1) so the EPG lookup can match
+ *   channels by id; missing `tvg-id` yields a null [Channel.tvgId].
  * - A stream URL seen twice keeps a single entry, but every distinct
  *   name it appeared under is merged into that entry ("CCTV-1 /
  *   CCTV-1 高清") instead of silently dropping the later names.
@@ -33,6 +35,7 @@ object M3uParser {
 
     private val LOGO_REGEX = Regex("tvg-logo=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
     private val GROUP_REGEX = Regex("group-title=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
+    private val TVG_ID_REGEX = Regex("tvg-id=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
 
     fun parse(text: String): List<Channel> {
         val channels = mutableListOf<Channel>()
@@ -58,6 +61,7 @@ object M3uParser {
                         group = pending.group.ifEmpty { "Default" },
                         logoUrl = pending.logo.takeIf { it.isNotEmpty() },
                         streamUrl = url,
+                        tvgId = pending.tvgId.takeIf { it.isNotEmpty() },
                     )
                 } else {
                     // Same stream under another name: keep every name so
@@ -80,18 +84,20 @@ object M3uParser {
         val name: String,
         val logo: String,
         val group: String,
+        val tvgId: String,
     )
 
     private fun parseExtinf(line: String): PendingChannel {
         val commaIndex = firstCommaOutsideQuotes(line, startIndex = 8)
         if (commaIndex == -1) {
-            return PendingChannel(name = "", logo = "", group = "")
+            return PendingChannel(name = "", logo = "", group = "", tvgId = "")
         }
         val name = line.substring(commaIndex + 1).trim()
         val attrs = line.substring(8, commaIndex)
         val logo = LOGO_REGEX.find(attrs)?.groupValues?.getOrNull(1).orEmpty()
         val group = GROUP_REGEX.find(attrs)?.groupValues?.getOrNull(1).orEmpty()
-        return PendingChannel(name = name, logo = logo, group = group)
+        val tvgId = TVG_ID_REGEX.find(attrs)?.groupValues?.getOrNull(1).orEmpty()
+        return PendingChannel(name = name, logo = logo, group = group, tvgId = tvgId)
     }
 
     /** Index of the first ',' at or after [startIndex] that is outside quotes, or -1. */

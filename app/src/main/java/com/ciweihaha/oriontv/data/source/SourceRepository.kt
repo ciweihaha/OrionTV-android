@@ -26,6 +26,14 @@ interface SourceRepository {
     suspend fun detail(vodId: String): VodDetail?
 
     /**
+     * Search by keyword (round 1). The default implementation returns an
+     * empty list, so repositories without a search endpoint (agg CMS)
+     * keep working unchanged; [TvBoxSourceRepository] overrides it with
+     * the CMS `ac=videolist&wd=` endpoint.
+     */
+    suspend fun search(query: String, page: Int): List<VodItem> = emptyList()
+
+    /**
      * Paged browse (round 9). The default implementation delegates to
      * [browse] and reports no further pages, so repositories that do not
      * know the total page count keep working unchanged.
