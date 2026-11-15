@@ -22,6 +22,7 @@ import com.ciweihaha.oriontv.data.source.M3uSource
 import com.ciweihaha.oriontv.data.source.PlaceholderSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivityLiveBinding
 import com.ciweihaha.oriontv.ui.player.PlayerActivity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -49,6 +50,11 @@ class LiveActivity : AppCompatActivity() {
     }
     private var channels: List<Channel> = emptyList()
     private var selected: Channel? = null
+    /** R13-E: in-flight EPG lookup for the detail panel. Fast scrolling
+     *  used to launch one lookup per focus change with no cancellation,
+     *  so a slow lookup for channel A could land after the user had
+     *  moved to channel B and show A's programmes under B's name. */
+    private var epgJob: Job? = null
     /** True when the list on screen is the placeholder set shown only
      *  because the configured M3U failed to load (button copy must say
      *  so instead of implying a real source is coming). */
@@ -157,8 +163,12 @@ class LiveActivity : AppCompatActivity() {
             m3uFailedFallback -> "直播源加载失败，请检查 M3U 地址"
             else -> "演示频道 · 暂无播放地址"
         }
-        lifecycleScope.launch {
+        epgJob?.cancel()
+        epgJob = lifecycleScope.launch {
             val (now, next) = epg.nowAndNext(channel.id)
+            // R13-E: the user may have moved on while the lookup ran —
+            // never paint another channel's programmes under this one.
+            if (selected?.id != channel.id) return@launch
             binding.nowTitle.text = now?.let { "正在播：${it.title}" } ?: "正在播：—"
             binding.nowTime.text = now?.let { formatRange(it) } ?: ""
             binding.nowProgress.progress = now?.let { (it.progress() * 100).toInt() } ?: 0
