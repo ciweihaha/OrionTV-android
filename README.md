@@ -3,19 +3,28 @@
 Android TV 播放器，Kotlin 原生重写版。由 React Native（Expo）版 OrionTV 重写而来，
 与 mytv-android 同栈：Kotlin + Leanback + Media3（ExoPlayer）。
 
-## 第一阶段（当前）
+## 当前状态（第 9 轮，2026-11-15）
 
 - 可编译的单模块工程：Gradle 8.7 + AGP 8.5.2 + Kotlin 2.0.21，
   minSdk 21 / targetSdk 34 / compileSdk 34
 - 核心骨架：启动、首页（Leanback 浏览）、直播页、点播浏览、详情页、播放器
-- 播放器：Media3 ExoPlayer，含跳过片头按钮（T5）与快进落点预览（T6/T7）
+- **直播**：M3U 播放列表解析（对齐 RN 语义）+ 两级缓存（内存 + 磁盘 7 天），
+  设置页可配置 M3U 地址（默认 https://live.ciweihaha.win/live.m3u），
+  播放器内可切换同名频道的多条线路（第 9 轮）
+- **点播**：agg CMS 真实源（分类、浏览、详情、选集可播），点播浏览支持翻页
+  （滚动到底自动加载下一页，第 9 轮）；未配置 TVBox 源时显示“未配置”空态，
+  点播不设默认第三方源
+- **EPG**：直播页与首页的 now/next 目前仍是占位数据（见下）
+- 播放器：Media3 ExoPlayer，含跳过片头按钮（T5，固定意图窗口）与快进落点预览（T6/T7）
 - 更新检查：继续走 okys-agg 的两个端点
   `/agg?ac=oriontv-version` 与 `/agg/oriontv-version.json`
-- GitHub Actions：`assembleDebug`，CI 绿灯
+- GitHub Actions：`assembleDebug`（先跑单测），CI 绿灯
 
-**注意：第一阶段的频道、节目单、点播内容均为占位数据**（代码里以
-`PlaceholderData` 标明，界面上有“演示数据”提示），源接入（TVBox 兼容源解析）
-与真实 EPG 在第二阶段做，接口与模块位置已留好。
+**注意：首页直播行与直播页的节目单仍是占位数据**（代码里以
+`PlaceholderData` 标明，界面上有“演示数据”提示）。真实 EPG（XMLTV 解析，
+默认 https://ysp.ciweihaha.win/epg.xml）与 TVBox 源、收藏、搜索在第 1 轮
+本地写过但未合入本仓库（备份见 `oriontv-android-round1-unpushed/` 的说明），
+需另行决定是否恢复。
 
 ## 设计令牌（按已批准的改版预览）
 
@@ -33,16 +42,20 @@ moontv 不碰。T8（正片中赌博广告自动跳过）先判定嵌入方式�
 ## 本地构建
 
 ```bash
-./gradlew assembleDebug
+# 推荐：直接用 Gradle 8.7 发行版（不要用 ./gradlew，wrapper 会尝试下载发行包）
+~/gradle-dist/gradle-8.7/bin/gradle testDebugUnitTest --max-workers=1
+~/gradle-dist/gradle-8.7/bin/gradle assembleDebug --max-workers=1
 # 产物：app/build/outputs/apk/debug/app-debug.apk
 ```
 
-需要 JDK 17 与 Android SDK（platform 34 + build-tools 34.0.0，
-Gradle 会按需自动下载）。首次运行会下载 Gradle 8.7 发行包。
+需要 JDK 17 与 Android SDK（platform 34 + build-tools 34.0.0）。
+`JAVA_TOOL_OPTIONS` 只加 `-Djava.net.preferIPv4Stack=true`，不要加代理。
 
-## 第二阶段（待做）
+## 还剩的缺口（下一轮候选）
 
-- TVBox 兼容源解析（`data/source/SourceRepository` 接口已留好）
-- 真实 EPG 接入（`data/epg/EpgRepository` 接口已留好）
-- 收藏、观看记录持久化、搜索、设置页
-- T8 判定与断点续播
+- 真实 EPG 接入直播页与首页（XMLTV 解析器在第 1 轮备份里，需恢复并接线）
+- TVBox 点播源（第 1 轮备份里，需恢复；agg 源已可用）
+- 收藏、观看记录持久化、搜索（第 1 轮备份里，需恢复）
+- 首页直播行改走真实 M3U 源（目前仍是占位频道）
+- T5 跳过片头真实检测（目前是固定意图窗口）；T8 判定；断点续播
+- 真机检查（荣耀智慧屏 X1 LOK-360C，Android 9，API 28）
