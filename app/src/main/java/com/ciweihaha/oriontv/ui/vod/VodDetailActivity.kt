@@ -14,7 +14,9 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.ciweihaha.oriontv.R
+import com.ciweihaha.oriontv.data.AppSources
 import com.ciweihaha.oriontv.data.model.Episode
+import com.ciweihaha.oriontv.data.model.FavoriteItem
 import com.ciweihaha.oriontv.data.model.VodDetail
 import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivityVodDetailBinding
@@ -33,6 +35,7 @@ class VodDetailActivity : AppCompatActivity() {
     private lateinit var binding: ActivityVodDetailBinding
     private val source = AggSourceRepository()
     private var selectedSource: String? = null
+    private var currentDetail: VodDetail? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,13 +51,21 @@ class VodDetailActivity : AppCompatActivity() {
             return
         }
         lifecycleScope.launch {
+            // Agg CMS first; if it has no such title (e.g. a TVBox search
+            // result), fall back to the configured TVBox source (round 1).
+            // With no TVBox API configured that call returns null at once.
             val detail = source.detail(vodId)
+                ?: runCatching { AppSources.source(this@VodDetailActivity).detail(vodId) }
+                    .getOrNull()
             if (detail == null) {
                 // Was a silent blank screen: say so, and keep the screen
                 // usable (back) instead of showing an empty hero.
                 showDetailError("详情加载失败，请检查网络后重试")
                 return@launch
             }
+            currentDetail = detail
+            refreshFavoriteButton()
+            binding.favoriteButton.setOnClickListener { toggleFavorite() }
             val density = resources.displayMetrics.density
             val widthPx = (240 * density).toInt()
             val heightPx = (360 * density).toInt()
@@ -78,7 +89,35 @@ class VodDetailActivity : AppCompatActivity() {
         binding.detailError.text = message
         binding.detailError.visibility = View.VISIBLE
         binding.playButton.isEnabled = false
+        binding.favoriteButton.isEnabled = false
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    /** Round 1: favourite toggle, backed by LibraryStore. */
+    private fun refreshFavoriteButton() {
+        val detail = currentDetail ?: return
+        val isFavorite = AppSources.library(this).isFavorite(detail.item.id)
+        binding.favoriteButton.text = if (isFavorite) "已收藏" else "收藏"
+    }
+
+    private fun toggleFavorite() {
+        val detail = currentDetail ?: return
+        val item = detail.item
+        val nowFavorite = AppSources.library(this).toggleFavorite(
+            FavoriteItem(
+                vodId = item.id,
+                title = item.title,
+                posterUrl = item.posterUrl,
+                year = item.year,
+                remarks = item.remarks,
+            ),
+        )
+        binding.favoriteButton.text = if (nowFavorite) "已收藏" else "收藏"
+        Toast.makeText(
+            this,
+            if (nowFavorite) "已收藏" else "已取消收藏",
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     /**
