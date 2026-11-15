@@ -15,7 +15,6 @@ import androidx.leanback.widget.OnItemViewClickedListener
 import androidx.lifecycle.lifecycleScope
 import com.ciweihaha.oriontv.R
 import com.ciweihaha.oriontv.data.AppSources
-import com.ciweihaha.oriontv.data.epg.PlaceholderEpgRepository
 import com.ciweihaha.oriontv.data.model.Channel
 import com.ciweihaha.oriontv.data.model.HomeAction
 import com.ciweihaha.oriontv.data.model.VodCategory
@@ -45,7 +44,6 @@ import kotlinx.coroutines.launch
 class HomeFragment : BrowseSupportFragment() {
 
     private val source = AggSourceRepository()
-    private val epg = PlaceholderEpgRepository()
     /** R13-C/D: kept so onResume can refresh the continue row in place
      *  (history changed after watching) and rebuild all rows when the
      *  source generation changed (M3U address edited in Settings). */
