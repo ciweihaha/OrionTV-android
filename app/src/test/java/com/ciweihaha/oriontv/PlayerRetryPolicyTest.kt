@@ -80,4 +80,45 @@ class PlayerRetryPolicyTest {
         assertEquals(8_000L, PlayerActivity.retryDelayMs(5))
         assertEquals(8_000L, PlayerActivity.retryDelayMs(99))
     }
+
+    @Test
+    fun `first error-driven switch is allowed with two lines`() {
+        // Fresh episode: no prior error-driven switch.
+        assertTrue(PlayerActivity.shouldAutoSwitchLine(2, 0, 0L))
+        assertTrue(PlayerActivity.shouldAutoSwitchLine(2, 0, 5_000L))
+    }
+
+    @Test
+    fun `second error-driven switch is blocked inside one unstable episode`() {
+        // R15-D regression: R14's READY-reset flag allowed this — the
+        // new line became READY, the flag cleared, and two flaky lines
+        // ping-ponged forever. A line that only played 5s is unstable,
+        // so a prior switch in this episode blocks the next one.
+        assertFalse(PlayerActivity.shouldAutoSwitchLine(2, 1, 5_000L))
+        assertFalse(PlayerActivity.shouldAutoSwitchLine(2, 1, 0L))
+        assertFalse(PlayerActivity.shouldAutoSwitchLine(3, 2, 30_000L))
+    }
+
+    @Test
+    fun `stable playback starts a new episode and allows switching again`() {
+        // The new line played 60s+ before failing: a new, unrelated
+        // failure, so the previous switch does not count.
+        assertTrue(
+            PlayerActivity.shouldAutoSwitchLine(
+                2, 1, PlayerActivity.STABLE_PLAY_MS
+            ),
+        )
+        assertTrue(
+            PlayerActivity.shouldAutoSwitchLine(
+                2, 1, PlayerActivity.STABLE_PLAY_MS + 60_000L
+            ),
+        )
+    }
+
+    @Test
+    fun `single line never auto-switches`() {
+        assertFalse(PlayerActivity.shouldAutoSwitchLine(1, 0, 0L))
+        assertFalse(PlayerActivity.shouldAutoSwitchLine(1, 0, 120_000L))
+        assertFalse(PlayerActivity.shouldAutoSwitchLine(0, 0, 0L))
+    }
 }

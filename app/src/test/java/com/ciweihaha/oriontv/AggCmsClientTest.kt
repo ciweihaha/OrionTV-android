@@ -239,6 +239,27 @@ class AggCmsClientTest {
     }
 
     @Test
+    fun `browsePaged all keeps the other types when one type fails`() = runTest {
+        // R15-B: a single failing type used to throw out of the whole
+        // "全部" fetch (failSoft) and blank the page. Now it is skipped
+        // and the surviving types still render.
+        val client = AggCmsClient(fetcher = { url ->
+            if (url.contains("t=2")) throw IllegalStateException("t=2 down") else listJson
+        })
+        val repo = AggSourceRepository(client = client)
+        val page = repo.browsePaged("all", 1)
+        assertEquals(2, page.items.size)
+        assertTrue(page.hasMore)
+        // Every type failing still yields an empty page, not a throw.
+        val allFailing = AggSourceRepository(
+            client = AggCmsClient(fetcher = { throw IllegalStateException("down") }),
+        )
+        val empty = allFailing.browsePaged("all", 1)
+        assertTrue(empty.items.isEmpty())
+        assertFalse(empty.hasMore)
+    }
+
+    @Test
     fun `browse delegates to browsePaged items`() = runTest {
         val client = AggCmsClient(fetcher = { listJson })
         val repo = AggSourceRepository(client = client)

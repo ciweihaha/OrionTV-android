@@ -74,6 +74,26 @@ class M3uSourceTest {
     }
 
     @Test
+    fun `disk cache round-trips tvgId`() = runTest {
+        // R15-C: tvgId used to be dropped by the cache JSON, so an
+        // offline-served channel had no EPG identity.
+        val playlistWithId = """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="cctv1" tvg-logo="https://example.com/cctv.png" group-title="央视",CCTV-1 高清
+            https://example.com/cctv1.m3u8
+        """.trimIndent()
+        val cache = diskCache()
+        val fetcher = M3uFetcher(fetchBytes = { playlistWithId.toByteArray(Charsets.UTF_8) })
+        val source = M3uSource(fetcher, cache)
+        val refreshed = source.refresh(url)
+        assertEquals(1, refreshed.size)
+        assertEquals("cctv1", refreshed[0].tvgId)
+        val cached = cache.get(url)
+        assertEquals(refreshed, cached)
+        assertEquals("cctv1", cached!![0].tvgId)
+    }
+
+    @Test
     fun `disk cache expired entry is a miss`() = runTest {
         val cache = diskCache()
         val fetcher = M3uFetcher(fetchBytes = { playlist.toByteArray(Charsets.UTF_8) })

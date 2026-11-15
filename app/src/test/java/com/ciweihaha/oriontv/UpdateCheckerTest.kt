@@ -11,54 +11,47 @@ import org.junit.Test
 class UpdateCheckerTest {
 
     @Test
-    fun `parses bare version and detects update`() = runTest {
-        val checker = UpdateChecker(fetcher = { "1.7.2" }, currentVersion = "0.1.0")
+    fun `newer tag reports update`() = runTest {
+        val checker = UpdateChecker(latestTag = { "0.2.0" }, currentVersion = "0.1.0")
         val result = checker.check().getOrThrow()
-        assertEquals("1.7.2", result.latestVersion)
+        assertEquals("0.2.0", result.latestVersion)
         assertTrue(result.updateAvailable)
     }
 
     @Test
-    fun `parses json version field`() = runTest {
-        val checker = UpdateChecker(
-            fetcher = { """{"version":"1.7.3"}""" },
-            currentVersion = "1.7.2",
-        )
-        val result = checker.check().getOrThrow()
-        assertEquals("1.7.3", result.latestVersion)
-        assertTrue(result.updateAvailable)
-    }
-
-    @Test
-    fun `no update when versions are equal`() = runTest {
-        val checker = UpdateChecker(fetcher = { "0.1.0" }, currentVersion = "0.1.0")
+    fun `no update when tag equals current version`() = runTest {
+        val checker = UpdateChecker(latestTag = { "0.1.0" }, currentVersion = "0.1.0")
         val result = checker.check().getOrThrow()
         assertFalse(result.updateAvailable)
     }
 
     @Test
-    fun `falls back to second endpoint when primary fails`() = runTest {
-        val checker = UpdateChecker(
-            fetcher = { url ->
-                if (url.contains("oriontv-version.json")) """{"version":"1.7.3"}"""
-                else throw IllegalStateException("primary down")
-            },
-            currentVersion = "1.7.2",
-        )
+    fun `old app line version is never compared against this rewrite`() = runTest {
+        // R15-A regression: the agg feed returns the OLD app's 1.7.2
+        // for a rewrite running 0.1.0. The new checker reads this
+        // repo's own releases, so a "1.7.2" tag can only come from a
+        // real release of this repo — and then it IS newer.
+        // The point of this test is the wiring: the version being
+        // compared is the repo's own tag, not an unrelated feed.
+        val checker = UpdateChecker(latestTag = { "0.1.0" }, currentVersion = "0.1.0")
         val result = checker.check().getOrThrow()
-        assertEquals("1.7.3", result.latestVersion)
+        assertEquals("0.1.0", result.latestVersion)
+        assertFalse(result.updateAvailable)
     }
 
     @Test
-    fun `invalid body fails the check`() = runTest {
-        val checker = UpdateChecker(fetcher = { "not-a-version" }, currentVersion = "0.1.0")
+    fun `tag resolver failure fails the check`() = runTest {
+        val checker = UpdateChecker(
+            latestTag = { throw IllegalStateException("network down") },
+            currentVersion = "0.1.0",
+        )
         assertTrue(checker.check().isFailure)
     }
 
     @Test
     fun `cancellation is not swallowed into a failure result`() = runTest {
         val checker = UpdateChecker(
-            fetcher = { throw kotlinx.coroutines.CancellationException("gone") },
+            latestTag = { throw kotlinx.coroutines.CancellationException("gone") },
             currentVersion = "0.1.0",
         )
         var cancelled = false
@@ -71,11 +64,38 @@ class UpdateCheckerTest {
     }
 
     @Test
-    fun `parseVersion handles both shapes`() {
+    fun `parseVersion handles version tag_name and bare shapes`() {
         assertEquals("1.7.2", UpdateChecker.parseVersion("1.7.2"))
         assertEquals("1.7.2", UpdateChecker.parseVersion("v1.7.2"))
         assertEquals("1.7.2", UpdateChecker.parseVersion("""{"version": "1.7.2"}"""))
+        assertEquals("0.2.0", UpdateChecker.parseVersion("""{"tag_name":"v0.2.0"}"""))
+        assertEquals("0.2.0", UpdateChecker.parseVersion("""{"tag_name":"0.2.0"}"""))
         assertNull(UpdateChecker.parseVersion("garbage"))
+        assertNull(UpdateChecker.parseVersion("""{"name":"v0.2.0"}"""))
+    }
+
+    @Test
+    fun `parseTagFromUrl takes the tag only from a tag page`() {
+        assertEquals(
+            "0.2.0",
+            UpdateChecker.parseTagFromUrl(
+                "https://github.com/ciweihaha/OrionTV-android/releases/tag/v0.2.0",
+            ),
+        )
+        assertEquals(
+            "0.2.0",
+            UpdateChecker.parseTagFromUrl(
+                "https://github.com/ciweihaha/OrionTV-android/releases/tag/0.2.0",
+            ),
+        )
+        // No releases: GitHub lands on the releases list, no tag.
+        assertNull(
+            UpdateChecker.parseTagFromUrl(
+                "https://github.com/ciweihaha/OrionTV-android/releases",
+            ),
+        )
+        assertNull(UpdateChecker.parseTagFromUrl("https://github.com/ciweihaha/OrionTV-android"))
+        assertNull(UpdateChecker.parseTagFromUrl("not a url"))
     }
 
     @Test
@@ -83,5 +103,6 @@ class UpdateCheckerTest {
         assertTrue(UpdateChecker.compareVersions("1.7.2", "1.7.10") < 0)
         assertTrue(UpdateChecker.compareVersions("1.10.0", "1.7.2") > 0)
         assertEquals(0, UpdateChecker.compareVersions("1.7.2", "1.7.2"))
+        assertTrue(UpdateChecker.compareVersions("0.2.0", "0.1.0") > 0)
     }
 }
