@@ -29,6 +29,15 @@ object AppSources {
     @Volatile
     private var config: SourceConfig? = null
 
+    /**
+     * R13-D: bumps on every [invalidate] so screens that cache the
+     * rendered rows (HomeFragment) can tell a Settings change happened
+     * and reload, instead of showing the old playlist until restart.
+     */
+    @Volatile
+    var sourceGeneration: Int = 0
+        private set
+
     fun config(context: Context): SourceConfig =
         config ?: SourceConfig(context).also { config = it }
 
@@ -69,5 +78,6 @@ object AppSources {
     fun invalidate() {
         source = null
         epg = null
+        sourceGeneration++
     }
 }
