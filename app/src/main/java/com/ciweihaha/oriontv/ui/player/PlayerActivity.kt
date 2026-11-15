@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -40,6 +41,12 @@ class PlayerActivity : AppCompatActivity() {
     private var baseTitle: String = ""
     private var lineUrls: List<String> = emptyList()
     private var lineIndex: Int = 0
+    /** URL + position of the current playback, kept across onStop/onStart
+     *  (S1): releasing the player in onStop must not lose them, or the
+     *  screen is dead after one HOME press. */
+    private var currentUrl: String = ""
+    private var savedPositionMs: Long = 0L
+    private var savedPlayWhenReady: Boolean = true
     private val seekPreview get() = _seekPreview
     private var _seekPreview: SeekPreviewController? = null
 
@@ -86,32 +93,45 @@ class PlayerActivity : AppCompatActivity() {
             switchToLine(LiveLines.nextIndex(lineIndex, lineUrls.size))
         }
         updateTitleAndLineButton()
+        currentUrl = url
         initPlayer(url)
         handler.post(progressTicker)
         showControls()
     }
 
-    private fun initPlayer(url: String) {
+    private fun initPlayer(url: String, startPositionMs: Long = 0L, playWhenReady: Boolean = true) {
         val exo = ExoPlayer.Builder(this).build()
         player = exo
         binding.playerView.player = exo
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                // D2: the raw message is often a wall of text (full URL,
+                // nested causes) that a Toast cuts off mid-sentence.
+                // Show a short mapped copy; the full detail stays in
+                // Logcat where it can actually be read.
                 Log.e(TAG, "playback error", error)
                 Toast.makeText(
                     this@PlayerActivity,
-                    "播放失败：${error.message}",
+                    shortPlaybackError(error),
                     Toast.LENGTH_LONG,
                 ).show()
             }
         })
         exo.setMediaItem(MediaItem.fromUri(url))
+        if (startPositionMs > 0) exo.seekTo(startPositionMs)
         exo.prepare()
-        exo.playWhenReady = true
+        exo.playWhenReady = playWhenReady
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
-                    _seekPreview = SeekPreviewController(exo.duration.coerceAtLeast(0L))
+                    // D3: no seek preview for live streams (see
+                    // [isLiveStream]): their duration is TIME_UNSET, so
+                    // a preview built here could only ever target 0.
+                    _seekPreview = if (isLiveStream(exo)) {
+                        null
+                    } else {
+                        SeekPreviewController(exo.duration.coerceAtLeast(0L))
+                    }
                 }
             }
         })
@@ -120,20 +140,89 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /**
-     * Multi-line (round 9): rebuild the player on the next line URL.
-     * The title and the line button update to the new line; the progress
-     * ticker keeps running (it guards on a null player).
+     * Multi-line (round 9, M9): try the new line on a fresh player FIRST
+     * and only release the old one once the new player reports READY.
+     * If the new line errors (or stalls past the timeout) the candidate
+     * is released and the old line keeps playing — the previous code
+     * released the old player first, so a failed switch lost playback.
      */
     private fun switchToLine(index: Int) {
         if (lineUrls.size <= 1 || index !in lineUrls.indices) return
-        lineIndex = index
-        player?.release()
-        player = null
+        if (index == lineIndex) return
+        resetSeekPreview()
+        val oldPlayer = player
+        val candidate = ExoPlayer.Builder(this).build()
+        var settled = false
+        val timeoutRunnable = Runnable {
+            if (!settled) {
+                settled = true
+                candidate.release()
+                if (!isDestroyed) {
+                    Toast.makeText(
+                        this@PlayerActivity,
+                        "线路 ${index + 1} 切换超时，已保留当前线路",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+        candidate.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY && !settled) {
+                    settled = true
+                    handler.removeCallbacks(timeoutRunnable)
+                    if (isDestroyed) {
+                        candidate.release()
+                        return
+                    }
+                    oldPlayer?.release()
+                    player = candidate
+                    binding.playerView.player = candidate
+                    lineIndex = index
+                    currentUrl = lineUrls[index]
+                    savedPositionMs = 0L
+                    // D3: same live guard as initPlayer — a live line
+                    // has no seekable duration.
+                    _seekPreview = if (isLiveStream(candidate)) {
+                        null
+                    } else {
+                        SeekPreviewController(candidate.duration.coerceAtLeast(0L))
+                    }
+                    updateTitleAndLineButton()
+                    Toast.makeText(this@PlayerActivity, "已切换到线路 ${index + 1}", Toast.LENGTH_SHORT).show()
+                    showControls()
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (settled) return
+                settled = true
+                handler.removeCallbacks(timeoutRunnable)
+                candidate.release()
+                if (isDestroyed) return
+                // The old player is untouched and still attached, so
+                // playback continues on the previous line.
+                Log.e(TAG, "line switch failed", error)
+                Toast.makeText(
+                    this@PlayerActivity,
+                    "线路 ${index + 1} 切换失败，已保留当前线路",
+                    Toast.LENGTH_LONG,
+                ).show()
+                showControls()
+            }
+        })
+        candidate.setMediaItem(MediaItem.fromUri(lineUrls[index]))
+        candidate.prepare()
+        candidate.playWhenReady = true
+        handler.postDelayed(timeoutRunnable, LINE_SWITCH_TIMEOUT_MS)
+    }
+
+    /** Clear a pending seek preview: its target belongs to the old line. */
+    private fun resetSeekPreview() {
+        _seekPreview?.cancel()
         _seekPreview = null
-        initPlayer(lineUrls[index])
-        updateTitleAndLineButton()
-        Toast.makeText(this, "已切换到线路 ${index + 1}", Toast.LENGTH_SHORT).show()
-        showControls()
+        handler.removeCallbacks(autoCommitRunnable)
+        binding.seekPreviewBubble.visibility = View.GONE
     }
 
     /** Title + line button: the button only shows when there are 2+ lines. */
@@ -157,9 +246,14 @@ class PlayerActivity : AppCompatActivity() {
                     return true
                 }
                 if (exo == null) return true
+                // D3: live streams have no seek preview (it is null —
+                // see initPlayer): the old code fell back to the
+                // current position and showed a "落点 00:00" bubble
+                // that auto-committed seekTo(0), throwing the viewer
+                // to the start of the DVR window. Just show controls.
+                val preview = seekPreview ?: return true
                 val direction = if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
-                val target = seekPreview?.nudge(exo.currentPosition, direction)
-                    ?: exo.currentPosition
+                val target = preview.nudge(exo.currentPosition, direction)
                 showSeekPreview(direction, target)
                 handler.removeCallbacks(autoCommitRunnable)
                 handler.postDelayed(autoCommitRunnable, SeekPreviewController.AUTO_COMMIT_MS)
@@ -253,11 +347,62 @@ class PlayerActivity : AppCompatActivity() {
         return "%02d:%02d".format(minutes, seconds)
     }
 
+    /**
+     * D3: a live stream has no seekable duration — ExoPlayer reports
+     * [C.TIME_UNSET] and flags the item live. Seeking such a stream
+     * is meaningless, so the preview flow is disabled for it.
+     */
+    private fun isLiveStream(exo: ExoPlayer): Boolean =
+        exo.isCurrentMediaItemLive || exo.duration == C.TIME_UNSET
+
+    /**
+     * D2: one short, readable line per failure kind. The raw
+     * [PlaybackException.message] (URL + cause chain) is logged, not
+     * shown — a Toast cuts it off mid-sentence.
+     */
+    private fun shortPlaybackError(error: PlaybackException): String = when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        -> "播放失败：网络异常，请检查网络后重试"
+        PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+        PlaybackException.ERROR_CODE_IO_NO_PERMISSION,
+        -> "播放失败：找不到播放地址"
+        PlaybackException.ERROR_CODE_DECODING_FAILED,
+        PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+        -> "播放失败：设备无法解码该视频"
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+        PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+        PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+        -> "播放失败：视频格式不支持"
+        else -> "播放失败，请稍后重试"
+    }
+
+    /**
+     * S1: onStop releases the player (required for background playback
+     * hygiene), but the URL + position + play state are saved first and
+     * onStart rebuilds the player from them — otherwise pressing HOME
+     * once leaves a dead screen with no player at all.
+     */
+    override fun onStart() {
+        super.onStart()
+        if (player == null && currentUrl.isNotEmpty() && !isFinishing) {
+            initPlayer(currentUrl, savedPositionMs, savedPlayWhenReady)
+            handler.post(progressTicker)
+            showControls()
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         handler.removeCallbacks(progressTicker)
         handler.removeCallbacks(hideControlsRunnable)
         handler.removeCallbacks(autoCommitRunnable)
+        savedPositionMs = player?.currentPosition ?: savedPositionMs
+        savedPlayWhenReady = player?.playWhenReady ?: savedPlayWhenReady
+        resetSeekPreview()
         player?.release()
         player = null
     }
@@ -272,5 +417,7 @@ class PlayerActivity : AppCompatActivity() {
         const val EXTRA_LINE_INDEX = "line_index"
         private const val TAG = "PlayerActivity"
         private const val CONTROLS_TIMEOUT_MS = 4_000L
+        /** Give up on a candidate line after this long; old line survives. */
+        private const val LINE_SWITCH_TIMEOUT_MS = 10_000L
     }
 }
