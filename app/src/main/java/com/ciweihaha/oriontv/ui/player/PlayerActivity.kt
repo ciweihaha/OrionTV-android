@@ -17,6 +17,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.ciweihaha.oriontv.R
+import com.ciweihaha.oriontv.data.source.LiveLines
 import com.ciweihaha.oriontv.databinding.ActivityPlayerBinding
 
 /**
@@ -36,6 +37,9 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var binding: ActivityPlayerBinding
     private var player: ExoPlayer? = null
     private var skipIntroEndMs: Long = 0L
+    private var baseTitle: String = ""
+    private var lineUrls: List<String> = emptyList()
+    private var lineIndex: Int = 0
     private val seekPreview get() = _seekPreview
     private var _seekPreview: SeekPreviewController? = null
 
@@ -61,12 +65,16 @@ class PlayerActivity : AppCompatActivity() {
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         skipIntroEndMs = intent.getLongExtra(EXTRA_SKIP_INTRO_END_MS, 0L)
+        baseTitle = title
+        lineUrls = intent.getStringArrayListExtra(EXTRA_LINE_URLS)
+            ?.filter { it.isNotBlank() }.orEmpty()
+        lineIndex = intent.getIntExtra(EXTRA_LINE_INDEX, 0)
+            .coerceIn(0, (lineUrls.size - 1).coerceAtLeast(0))
         if (url.isEmpty()) {
             Toast.makeText(this, "没有可播放的地址", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
-        binding.playerTitle.text = title
         binding.seekBar.isFocusable = false // progress display only; seek via preview flow
         binding.playPauseButton.setOnClickListener { togglePlayPause() }
         binding.skipIntroButton.setOnClickListener {
@@ -74,7 +82,12 @@ class PlayerActivity : AppCompatActivity() {
             binding.skipIntroButton.visibility = View.GONE
             showControls()
         }
+        binding.lineSwitchButton.setOnClickListener {
+            switchToLine(LiveLines.nextIndex(lineIndex, lineUrls.size))
+        }
+        updateTitleAndLineButton()
         initPlayer(url)
+        handler.post(progressTicker)
         showControls()
     }
 
@@ -102,7 +115,37 @@ class PlayerActivity : AppCompatActivity() {
                 }
             }
         })
-        handler.post(progressTicker)
+        // The progress ticker is posted once in onCreate, not here, so a
+        // line switch (which re-inits the player) does not double-post it.
+    }
+
+    /**
+     * Multi-line (round 9): rebuild the player on the next line URL.
+     * The title and the line button update to the new line; the progress
+     * ticker keeps running (it guards on a null player).
+     */
+    private fun switchToLine(index: Int) {
+        if (lineUrls.size <= 1 || index !in lineUrls.indices) return
+        lineIndex = index
+        player?.release()
+        player = null
+        _seekPreview = null
+        initPlayer(lineUrls[index])
+        updateTitleAndLineButton()
+        Toast.makeText(this, "已切换到线路 ${index + 1}", Toast.LENGTH_SHORT).show()
+        showControls()
+    }
+
+    /** Title + line button: the button only shows when there are 2+ lines. */
+    private fun updateTitleAndLineButton() {
+        if (lineUrls.size > 1) {
+            binding.playerTitle.text = "$baseTitle · 线路 ${lineIndex + 1}"
+            binding.lineSwitchButton.text = "线路 ${lineIndex + 1}/${lineUrls.size}"
+            binding.lineSwitchButton.visibility = View.VISIBLE
+        } else {
+            binding.playerTitle.text = baseTitle
+            binding.lineSwitchButton.visibility = View.GONE
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -223,6 +266,10 @@ class PlayerActivity : AppCompatActivity() {
         const val EXTRA_URL = "url"
         const val EXTRA_TITLE = "title"
         const val EXTRA_SKIP_INTRO_END_MS = "skip_intro_end_ms"
+        /** All playable line URLs of the current channel (round 9). */
+        const val EXTRA_LINE_URLS = "line_urls"
+        /** Index into [EXTRA_LINE_URLS] of the line being played. */
+        const val EXTRA_LINE_INDEX = "line_index"
         private const val TAG = "PlayerActivity"
         private const val CONTROLS_TIMEOUT_MS = 4_000L
     }
