@@ -3,7 +3,7 @@
 Android TV 播放器，Kotlin 原生重写版。由 React Native（Expo）版 OrionTV 重写而来，
 与 mytv-android 同栈：Kotlin + Leanback + Media3（ExoPlayer）。
 
-## 当前状态（第 9 轮，2026-11-15）
+## 当前状态（第 11 轮，2026-11-15：第 1 轮恢复）
 
 - 可编译的单模块工程：Gradle 8.7 + AGP 8.5.2 + Kotlin 2.0.21，
   minSdk 21 / targetSdk 34 / compileSdk 34
@@ -14,17 +14,28 @@ Android TV 播放器，Kotlin 原生重写版。由 React Native（Expo）版 Or
 - **点播**：agg CMS 真实源（分类、浏览、详情、选集可播），点播浏览支持翻页
   （滚动到底自动加载下一页，第 9 轮）；未配置 TVBox 源时显示“未配置”空态，
   点播不设默认第三方源
-- **EPG**：直播页与首页的 now/next 目前仍是占位数据（见下）
+- **TVBox 点播源（第 11 轮恢复）**：TvBoxParser + TvBoxSourceRepository，
+  CMS JSON API（`?ac=list` / `?ac=videolist` / `?ac=detail`），
+  分类/浏览/搜索/详情全通；未配置 TVBox 源地址时点播相关调用返回空，
+  不影响 agg 源。搜索页、收藏页已接通，首页「应用」行有入口
+- **EPG（第 11 轮恢复）**：XMLTV 解析器 + XmlTvEpgRepository，
+  直播页 now/next 已接真实节目单（默认 https://ysp.ciweihaha.win/epg.xml，
+  按 `tvg-id` 匹配，失败回落按台名匹配；拉取失败保留上次好的缓存）；
+  首页直播行仍是占位数据
+- **收藏与观看记录（第 11 轮恢复）**：LibraryStore（SharedPreferences），
+  详情页可按「收藏」添加/取消，首页「应用」行进「我的收藏」；
+  搜索历史本地保存；WatchRecord 带断点续播位计算（距开头 10 秒内或
+  距结尾 60 秒内从头播）
 - 播放器：Media3 ExoPlayer，含跳过片头按钮（T5，固定意图窗口）与快进落点预览（T6/T7）
 - 更新检查：继续走 okys-agg 的两个端点
   `/agg?ac=oriontv-version` 与 `/agg/oriontv-version.json`
 - GitHub Actions：`assembleDebug`（先跑单测），CI 绿灯
 
-**注意：首页直播行与直播页的节目单仍是占位数据**（代码里以
-`PlaceholderData` 标明，界面上有“演示数据”提示）。真实 EPG（XMLTV 解析，
-默认 https://ysp.ciweihaha.win/epg.xml）与 TVBox 源、收藏、搜索在第 1 轮
-本地写过但未合入本仓库（备份见 `oriontv-android-round1-unpushed/` 的说明），
-需另行决定是否恢复。
+**注意：首页直播行仍是占位数据**（代码里以
+`PlaceholderData` 标明，界面上有“演示数据”提示）。第 1 轮当初未推送的
+17 个文件已在本轮全部恢复并补齐缺失的依赖（FavoriteItem/WatchRecord 模型、
+SourceRepository.search()、Channel.tvgId、Manifest 注册），另接了
+首页入口、详情页收藏按钮与 TVBox 详情兜底、直播页真实 EPG。
 
 ## 设计令牌（按已批准的改版预览）
 
@@ -53,9 +64,6 @@ moontv 不碰。T8（正片中赌博广告自动跳过）先判定嵌入方式�
 
 ## 还剩的缺口（下一轮候选）
 
-- 真实 EPG 接入直播页与首页（XMLTV 解析器在第 1 轮备份里，需恢复并接线）
-- TVBox 点播源（第 1 轮备份里，需恢复；agg 源已可用）
-- 收藏、观看记录持久化、搜索（第 1 轮备份里，需恢复）
 - 首页直播行改走真实 M3U 源（目前仍是占位频道）
-- T5 跳过片头真实检测（目前是固定意图窗口）；T8 判定；断点续播
+- T5 跳过片头真实检测（目前是固定意图窗口）；T8 判定；断点续播接播放器
 - 真机检查（荣耀智慧屏 X1 LOK-360C，Android 9，API 28）
