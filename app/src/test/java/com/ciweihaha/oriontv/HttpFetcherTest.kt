@@ -1,6 +1,7 @@
 package com.ciweihaha.oriontv
 
 import com.ciweihaha.oriontv.data.source.HttpFetcher
+import com.ciweihaha.oriontv.data.source.readBytesCapped
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
