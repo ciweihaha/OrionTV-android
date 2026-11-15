@@ -118,16 +118,50 @@ class AggCmsClientTest {
     }
 
     @Test
-    fun `detail parses episodes from first source group only`() = runTest {
+    fun `detail parses episodes from all source groups`() = runTest {
         val client = AggCmsClient(fetcher = { detailJson })
         val item = client.detail("src~111")!!
         assertEquals("完整简介", item.content)
         val episodes = client.parseEpisodes(item.playFrom, item.playUrl)
-        assertEquals(2, episodes.size)
+        assertEquals(3, episodes.size)
         assertEquals("国语中字", episodes[0].title)
         assertEquals("https://example.com/a.m3u8", episodes[0].url)
+        assertEquals("lzm3u8", episodes[0].source)
         assertEquals("粤语中字", episodes[1].title)
         assertEquals("https://example.com/b.m3u8", episodes[1].url)
+        assertEquals("lzm3u8", episodes[1].source)
+        assertEquals("国语中字", episodes[2].title)
+        assertEquals("https://example.com/c.m3u8", episodes[2].url)
+        assertEquals("liangzi", episodes[2].source)
+    }
+
+    @Test
+    fun `parseEpisodes falls back to generated source names`() {
+        val client = AggCmsClient(fetcher = { "" })
+        val episodes = client.parseEpisodes(
+            "",
+            "第1集\$https://example.com/a.m3u8\$\$\$第1集\$https://example.com/b.m3u8",
+        )
+        assertEquals(2, episodes.size)
+        assertEquals("线路 1", episodes[0].source)
+        assertEquals("线路 2", episodes[1].source)
+    }
+
+    @Test
+    fun `cancellation is not retried as a failure`() = runTest {
+        var calls = 0
+        val client = AggCmsClient(fetcher = {
+            calls++
+            throw kotlinx.coroutines.CancellationException("gone")
+        })
+        var cancelled = false
+        try {
+            client.videolist(1, 1)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            cancelled = true
+        }
+        assertTrue(cancelled)
+        assertEquals(1, calls)
     }
 
     @Test
@@ -155,7 +189,7 @@ class AggCmsClientTest {
         assertEquals("src~111", items[0].id)
         val detail = repo.detail("src~111")!!
         assertEquals("完整简介", detail.description)
-        assertEquals(2, detail.episodes.size)
+        assertEquals(3, detail.episodes.size)
         // Failure path: every call fails -> empty / null, no throw.
         val failing = AggSourceRepository(
             client = AggCmsClient(fetcher = { throw IllegalStateException("down") }),
@@ -189,6 +223,19 @@ class AggCmsClientTest {
         val page = failing.browsePaged("1", 2)
         assertTrue(page.items.isEmpty())
         assertFalse(page.hasMore)
+    }
+
+    @Test
+    fun `browsePaged all merges every type instead of returning movies only`() = runTest {
+        val client = AggCmsClient(fetcher = { listJson })
+        val repo = AggSourceRepository(client = client)
+        val page = repo.browsePaged("all", 1)
+        // Classes are t=1 and t=2, each returning the same 2 fixture items.
+        assertEquals(4, page.items.size)
+        assertTrue(page.hasMore)
+        // Non-numeric ids behave the same as "all".
+        val unknown = repo.browsePaged("movie", 1)
+        assertEquals(4, unknown.items.size)
     }
 
     @Test

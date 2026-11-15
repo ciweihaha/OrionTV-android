@@ -56,6 +56,21 @@ class UpdateCheckerTest {
     }
 
     @Test
+    fun `cancellation is not swallowed into a failure result`() = runTest {
+        val checker = UpdateChecker(
+            fetcher = { throw kotlinx.coroutines.CancellationException("gone") },
+            currentVersion = "0.1.0",
+        )
+        var cancelled = false
+        try {
+            checker.check()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            cancelled = true
+        }
+        assertTrue(cancelled)
+    }
+
+    @Test
     fun `parseVersion handles both shapes`() {
         assertEquals("1.7.2", UpdateChecker.parseVersion("1.7.2"))
         assertEquals("1.7.2", UpdateChecker.parseVersion("v1.7.2"))

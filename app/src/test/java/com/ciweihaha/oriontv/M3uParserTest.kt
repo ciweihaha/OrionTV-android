@@ -43,7 +43,19 @@ class M3uParserTest {
     }
 
     @Test
-    fun `duplicate url keeps first entry only`() {
+    fun `lowercase extinf directive still parses`() {
+        val text = """
+            #EXTM3U
+            #extinf:-1 group-title="央视",CCTV-1
+            https://example.com/cctv1.m3u8
+        """.trimIndent()
+        val channels = M3uParser.parse(text)
+        assertEquals(1, channels.size)
+        assertEquals("CCTV-1", channels[0].name)
+    }
+
+    @Test
+    fun `duplicate url merges every name into one entry`() {
         val text = """
             #EXTINF:-1 group-title="央视",CCTV-1
             https://example.com/same.m3u8
@@ -52,8 +64,21 @@ class M3uParserTest {
         """.trimIndent()
         val channels = M3uParser.parse(text)
         assertEquals(1, channels.size)
-        assertEquals("CCTV-1", channels[0].name)
+        assertEquals("CCTV-1 / 湖南卫视", channels[0].name)
         assertEquals("001", channels[0].number)
+    }
+
+    @Test
+    fun `duplicate url with the same name does not repeat the name`() {
+        val text = """
+            #EXTINF:-1 group-title="央视",CCTV-1
+            https://example.com/same.m3u8
+            #EXTINF:-1 group-title="央视",CCTV-1
+            https://example.com/same.m3u8
+        """.trimIndent()
+        val channels = M3uParser.parse(text)
+        assertEquals(1, channels.size)
+        assertEquals("CCTV-1", channels[0].name)
     }
 
     @Test

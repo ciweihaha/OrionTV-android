@@ -83,6 +83,45 @@ class PagingStateTest {
     }
 
     @Test
+    fun `first empty page keeps hasMore second consecutive empty page ends it`() {
+        val paging = PagingState()
+        paging.onLoadStarted()
+        paging.onEmptyPage(1)
+        assertEquals(1, paging.currentPage)
+        assertTrue(paging.hasMore)
+        assertTrue(paging.canLoadMore())
+        assertEquals(2, paging.nextPage)
+        paging.onLoadStarted()
+        paging.onEmptyPage(2)
+        assertEquals(2, paging.currentPage)
+        assertFalse(paging.hasMore)
+        assertFalse(paging.canLoadMore())
+    }
+
+    @Test
+    fun `non-empty page resets the empty streak`() {
+        val paging = PagingState()
+        paging.onLoadStarted()
+        paging.onEmptyPage(1)
+        paging.onLoadStarted()
+        paging.onPageLoaded(2, true)
+        assertEquals(0, paging.consecutiveEmptyPages)
+        paging.onLoadStarted()
+        paging.onEmptyPage(3)
+        assertTrue(paging.hasMore)
+    }
+
+    @Test
+    fun `reset clears the empty streak`() {
+        val paging = PagingState()
+        paging.onLoadStarted()
+        paging.onEmptyPage(1)
+        paging.reset()
+        assertEquals(0, paging.consecutiveEmptyPages)
+        assertTrue(paging.hasMore)
+    }
+
+    @Test
     fun `shouldLoadMore is false while loading or at the last page`() {
         val paging = PagingState()
         paging.onLoadStarted()
