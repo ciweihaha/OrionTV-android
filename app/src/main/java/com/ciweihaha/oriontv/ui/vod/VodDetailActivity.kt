@@ -18,10 +18,12 @@ import com.ciweihaha.oriontv.data.AppSources
 import com.ciweihaha.oriontv.data.model.Episode
 import com.ciweihaha.oriontv.data.model.FavoriteItem
 import com.ciweihaha.oriontv.data.model.VodDetail
+import com.ciweihaha.oriontv.data.settings.AppSettings
 import com.ciweihaha.oriontv.data.source.AggSourceRepository
 import com.ciweihaha.oriontv.databinding.ActivityVodDetailBinding
 import com.ciweihaha.oriontv.ui.common.PosterArt
 import com.ciweihaha.oriontv.ui.common.PosterLoader
+import com.ciweihaha.oriontv.ui.player.IntroSkip
 import com.ciweihaha.oriontv.ui.player.PlayerActivity
 import kotlinx.coroutines.launch
 
@@ -179,6 +181,13 @@ class VodDetailActivity : AppCompatActivity() {
         val resumeMs = AppSources.library(this)
             .progressFor(detail.item.id, episode.index)
             ?.resumePositionMs() ?: 0L
+        // 片头结束点：学到的落点优先（本剧通用），没有学过用设置里的默认时长，
+        // 0 表示不跳过（播放器不显示跳过按钮）。
+        val learnedMs = AppSources.library(this).learnedIntroEndMs(detail.item.id)
+        val introEndMs = IntroSkip.resolveIntroEndMs(
+            learnedMs,
+            AppSettings(this).getSkipIntroSeconds(),
+        )
         startActivity(
             Intent(this, PlayerActivity::class.java)
                 .putExtra(PlayerActivity.EXTRA_URL, url)
@@ -187,7 +196,8 @@ class VodDetailActivity : AppCompatActivity() {
                 .putExtra(PlayerActivity.EXTRA_VOD_TITLE, title)
                 .putExtra(PlayerActivity.EXTRA_EPISODE_INDEX, episode.index)
                 .putExtra(PlayerActivity.EXTRA_EPISODE_TITLE, episode.title)
-                .putExtra(PlayerActivity.EXTRA_START_POSITION_MS, resumeMs),
+                .putExtra(PlayerActivity.EXTRA_START_POSITION_MS, resumeMs)
+                .putExtra(PlayerActivity.EXTRA_SKIP_INTRO_END_MS, introEndMs),
         )
         if (resumeMs > 0) {
             Toast.makeText(this, "从断点继续播放", Toast.LENGTH_SHORT).show()
