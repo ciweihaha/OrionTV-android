@@ -3,17 +3,23 @@ package com.ciweihaha.oriontv.data.source
 import com.ciweihaha.oriontv.data.model.VodCategory
 import com.ciweihaha.oriontv.data.model.VodDetail
 import com.ciweihaha.oriontv.data.model.VodItem
+import com.ciweihaha.oriontv.data.model.VodPage
 import com.ciweihaha.oriontv.data.model.Channel
 
 /**
- * VOD from agg (Apple CMS), live channels still from the placeholder
- * until the M3U source is wired (stage 2).
+ * VOD from agg (Apple CMS); live channels come from the M3U source when
+ * configured (LiveActivity) and fall back to the placeholder demo set
+ * here only when no M3U address is configured or the load fails.
  *
  * Categories come from the `class` array of `videolist(t=1, pg=1)`:
  * 1 电影 / 2 电视剧 / 3 动漫 / 4 综艺 / 108 儿童启蒙, with "全部"
  * prepended. "全部" maps to `t=1` (the default first page, same as the
  * reference home). Failures are fail-soft: empty list / null, never a
  * throw — the UI shows its empty state instead of crashing.
+ *
+ * Pagination (round 9): [browsePaged] reports `hasMore` from the CMS
+ * `pagecount`, so the browse screen can keep loading pages until the
+ * last one instead of stopping at page 1.
  */
 class AggSourceRepository(
     private val client: AggCmsClient = AggCmsClient(),
@@ -38,10 +44,17 @@ class AggSourceRepository(
     }
 
     override suspend fun browse(categoryId: String, page: Int): List<VodItem> =
+        browsePaged(categoryId, page).items
+
+    override suspend fun browsePaged(categoryId: String, page: Int): VodPage =
         runCatching {
             val type = categoryId.toIntOrNull() ?: 1
-            client.videolist(type, page).list.map { it.toVodItem() }
-        }.getOrDefault(emptyList())
+            val result = client.videolist(type, page.coerceAtLeast(1))
+            VodPage(
+                items = result.list.map { it.toVodItem() },
+                hasMore = result.page < result.pageCount,
+            )
+        }.getOrDefault(VodPage(emptyList(), hasMore = false))
 
     override suspend fun detail(vodId: String): VodDetail? =
         runCatching {
